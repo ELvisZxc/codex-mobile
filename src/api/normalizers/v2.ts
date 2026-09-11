@@ -400,6 +400,10 @@ export function toUiFileChanges(changes: unknown): UiFileChange[] {
 }
 
 function toUiMessages(item: ThreadItem): UiMessage[] {
+  const rawItem = item as ThreadItem & Record<string, unknown>
+  const rawTimestamp = rawItem.createdAt ?? rawItem.created_at ?? rawItem.timestamp
+  const createdAtMs = typeof rawTimestamp === 'string' ? Date.parse(rawTimestamp) : NaN
+  const messageTime = Number.isFinite(createdAtMs) ? createdAtMs : undefined
   if (item.type === 'agentMessage') {
     return [
       {
@@ -407,6 +411,7 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
         role: 'assistant',
         text: item.text,
         messageType: item.type,
+        createdAtMs: messageTime,
       },
     ]
   }
@@ -425,6 +430,7 @@ function toUiMessages(item: ThreadItem): UiMessage[] {
         skills: parsed.skills.length > 0 ? parsed.skills : undefined,
         fileAttachments: parsed.fileAttachments.length > 0 ? parsed.fileAttachments : undefined,
         messageType: item.type,
+        createdAtMs: messageTime,
         isAutomationRun: parsed.isAutomationRun,
         automationDisplayName: parsed.automationDisplayName,
       })

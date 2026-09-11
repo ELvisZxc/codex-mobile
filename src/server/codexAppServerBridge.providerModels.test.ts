@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeProviderModelsData } from './codexAppServerBridge'
+import { buildProviderModelDiscoveryResponse, normalizeProviderModelsData } from './codexAppServerBridge'
 
 describe('provider model discovery payload normalization', () => {
+  it('falls back to catalog models when provider discovery is empty', () => {
+    expect(buildProviderModelDiscoveryResponse(
+      { data: [], providerId: 'fasthub', source: 'provider' },
+      ['openai/gpt-5.6-sol', 'openai/gpt-5.6-luna'],
+      'fasthub',
+    )).toEqual({
+      data: ['openai/gpt-5.6-sol', 'openai/gpt-5.6-luna'],
+      providerId: 'fasthub',
+      source: 'catalog',
+      exclusive: true,
+    })
+  })
+
   it('reads OpenAI-compatible model ids from data rows', () => {
     expect(normalizeProviderModelsData({
       data: [

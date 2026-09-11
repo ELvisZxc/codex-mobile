@@ -118,6 +118,12 @@ function onToggle(): void {
   isOpen.value = !isOpen.value
 }
 
+/** openMenu 由 Composer 命令显式打开当前下拉菜单。 */
+function openMenu(): void {
+  if (props.disabled) return
+  isOpen.value = true
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
@@ -220,6 +226,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onDocumentPointerDown)
   removeLayoutListeners()
 })
+
+defineExpose({ openMenu })
 </script>
 
 <style scoped>

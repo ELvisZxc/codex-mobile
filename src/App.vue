@@ -960,7 +960,8 @@
                   @update:selected-collaboration-mode="onSelectCollaborationMode"
                   @update:selected-model="onSelectModel"
                   @update:selected-reasoning-effort="onSelectReasoningEffort"
-                  @update:selected-speed-mode="onSelectSpeedMode" />
+                  @update:selected-speed-mode="onSelectSpeedMode"
+                  @slash-command="onSlashCommand" />
               </div>
             </div>
           </template>
@@ -1045,6 +1046,7 @@
                     @submit="onSubmitThreadMessage" @update:selected-model="onSelectModel"
                     @update:selected-reasoning-effort="onSelectReasoningEffort"
                     @update:selected-speed-mode="onSelectSpeedMode"
+                    @slash-command="onSlashCommand"
                     @interrupt="onInterruptTurn" />
                 </div>
               </template>
@@ -1192,6 +1194,7 @@ import { useFeedbackDiagnostics } from './composables/useFeedbackDiagnostics'
 import {
   checkoutGitBranch,
   cloneGithubRepository,
+  compactThread,
   configureTelegramBot,
   createPermanentWorktree,
   createWorktree,
@@ -1201,6 +1204,7 @@ import {
   getGitBranchCommits,
   getGitCommitFiles,
   getGitRepositoryStatus,
+  getMethodCatalog,
   getReviewSummary,
   getWorktreeBranchOptions,
   getAccounts,
@@ -1227,6 +1231,7 @@ import {
 } from './api/codexGateway'
 import type { ReasoningEffort, SpeedMode, UiAccountEntry, UiRateLimitWindow, UiServerRequest, UiServerRequestReply, UiThreadAutomation, UiThreadTokenUsage } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
+import type { SlashCommandName } from './components/content/threadComposerInputUtils'
 import type { GitCommitFileChange, GitCommitOption, LocalDirectoryEntry, TelegramStatus, ThreadTerminalQuickCommand, WorktreeBranchOption } from './api/codexGateway'
 import { getFreeModeStatus, setFreeMode, setFreeModeCustomKey, setCustomProvider } from './api/codexGateway'
 import { getPathLeafName, getPathParent, isProjectlessChatPath, normalizePathForUi } from './pathUtils.js'
@@ -3705,6 +3710,49 @@ function onToggleContentHeaderReview(): void {
   reviewInitialFilePath.value = ''
   reviewInitialCommitSha.value = ''
   isReviewPaneOpen.value = !isReviewPaneOpen.value
+}
+
+/** onSlashCommand 执行需要页面路由或 app-server 的 Composer 命令。 */
+async function onSlashCommand(command: SlashCommandName): Promise<void> {
+  if (command === 'mcp') {
+    await router.push({ name: 'skills', query: { tab: 'skills' } })
+    if (isMobile.value) setSidebarCollapsed(true)
+    return
+  }
+
+  const composer = isHomeRoute.value ? homeThreadComposerRef.value : threadComposerRef.value
+  if (command === 'review') {
+    if (route.name !== 'thread' || !selectedThreadId.value) {
+      composer?.showNotice('Open a thread before starting review.')
+      return
+    }
+    reviewInitialFilePath.value = ''
+    reviewInitialCommitSha.value = ''
+    isReviewPaneOpen.value = true
+    return
+  }
+
+  if (command !== 'compact') return
+  if (!selectedThreadId.value || route.name !== 'thread') {
+    composer?.showNotice('Open a thread before compacting context.')
+    return
+  }
+  if (isSelectedThreadInProgress.value) {
+    composer?.showNotice('Wait for the current turn to finish before compacting context.')
+    return
+  }
+
+  try {
+    const methods = await getMethodCatalog()
+    if (!methods.includes('thread/compact/start')) {
+      composer?.showNotice('Context compaction is unavailable in the connected Codex app-server.')
+      return
+    }
+    await compactThread(selectedThreadId.value)
+    composer?.showNotice('Context compaction started.')
+  } catch (error) {
+    composer?.showNotice(error instanceof Error ? error.message : 'Context compaction failed.')
+  }
 }
 
 function clearCommitReviewContext(): void {

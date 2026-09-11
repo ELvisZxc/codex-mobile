@@ -26,6 +26,17 @@ function threadReadResponseWithContent(content: ThreadReadResponse['thread']['tu
 }
 
 describe('normalizeThreadMessagesV2', () => {
+  it('preserves user message timestamps when supplied by app-server', () => {
+    const messages = normalizeThreadMessagesV2(threadReadResponseWithContent([{
+      type: 'userMessage',
+      id: 'user-time-1',
+      ...({ createdAt: '2026-09-04T08:09:10.000Z' }),
+      content: [{ type: 'text', text: 'Timestamped question', text_elements: [] }],
+    }]))
+
+    expect(messages[0]).toMatchObject({ role: 'user', createdAtMs: Date.parse('2026-09-04T08:09:10.000Z') })
+  })
+
   it('preserves selected skill inputs on the rendered user message', () => {
     const messages = normalizeThreadMessagesV2(threadReadResponseWithContent([{
       type: 'userMessage',

@@ -51,6 +51,8 @@ export type ThreadItem = {
   text?: string
   content?: unknown
   summary?: string[]
+  createdAt?: string
+  created_at?: string
 }
 
 export type UserInput = {
@@ -222,6 +224,7 @@ export type UiMessage = {
   turnIndex?: number
   isAutomationRun?: boolean
   automationDisplayName?: string | null
+  createdAtMs?: number
 }
 
 export type UiServerRequest = {

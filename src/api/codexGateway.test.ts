@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getAvailableModelIds, getThreadDetail, listDirectoryComposioConnectors, resumeThread, startThreadTurn } from './codexGateway'
+import { compactThread, getAvailableModelIds, getThreadDetail, listDirectoryComposioConnectors, resumeThread, startThreadTurn } from './codexGateway'
 
 function mockRpcFetch(): { requests: Array<{ method: string, params: Record<string, unknown> }> } {
   const requests: Array<{ method: string, params: Record<string, unknown> }> = []
@@ -58,6 +58,23 @@ describe('startThreadTurn collaboration mode payloads', () => {
         developer_instructions: null,
       },
     })
+  })
+})
+
+describe('compactThread', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('uses the app-server thread compact RPC contract', async () => {
+    const { requests } = mockRpcFetch()
+
+    await compactThread('thread-1')
+
+    expect(requests).toEqual([{
+      method: 'thread/compact/start',
+      params: { threadId: 'thread-1' },
+    }])
   })
 })
 

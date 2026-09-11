@@ -1,0 +1,10 @@
+.git
+.gitignore
+node_modules
+dist
+dist-cli
+runtime
+output
+coverage
+*.log
+deploy/codexapp-fork.env

@@ -39,5 +39,7 @@ Return to the [manual test index](../../tests.md).
 | [Backend-drained queue UI refresh](backend-drained-queue-ui-refresh.md) |
 | [Persisted idle queue recovery](persisted-idle-queue-recovery.md) |
 | [First user message is visible immediately in new chats](first-user-message-is-visible-immediately-in-new-chats.md) |
+| [User message hover copy and edit icons](user-message-hover-copy-and-edit-icons.md) |
 | [New chat live thinking and stop controls](new-chat-live-thinking-and-stop-controls.md) |
 | [Bold URL trailing punctuation parsing](bold-url-trailing-punctuation-parsing.md) |
+| [Slash commands and composer input history](slash-commands-and-input-history.md) |

@@ -1,5 +1,8 @@
 <template>
   <form class="thread-composer" @submit.prevent="onSubmit(isTurnInProgress ? activeInProgressMode : 'steer')">
+    <p v-if="composerNotice" class="thread-composer-notice" role="status">
+      {{ composerNotice }}
+    </p>
     <p v-if="dictationErrorText" class="thread-composer-dictation-error">
       {{ dictationErrorText }}
     </p>
@@ -123,6 +126,13 @@
           </template>
           <div v-else class="thread-composer-file-mention-empty">{{ t('No matching files') }}</div>
         </div>
+        <SlashCommandMenu
+          v-else-if="isSlashCommandOpen"
+          :commands="slashCommandSuggestions"
+          :highlighted-index="slashCommandHighlightedIndex"
+          @highlight="slashCommandHighlightedIndex = $event"
+          @select="applySlashCommand"
+        />
         <textarea
           ref="inputRef"
           v-model="draft"
@@ -258,6 +268,7 @@
 
         <template v-if="!isDictationRecording">
           <ComposerDropdown
+            ref="modelDropdownRef"
             class="thread-composer-control"
             :model-value="selectedModel"
             :options="modelOptions"
@@ -287,6 +298,7 @@
           />
 
           <ComposerDropdown
+            ref="reasoningDropdownRef"
             class="thread-composer-control"
             :model-value="selectedReasoningEffort"
             :options="reasoningOptions"
@@ -423,6 +435,21 @@ import IconTablerMinimize from '../icons/IconTablerMinimize.vue'
 import IconTablerPlayerStopFilled from '../icons/IconTablerPlayerStopFilled.vue'
 import ComposerDropdown from './ComposerDropdown.vue'
 import ComposerSearchDropdown from './ComposerSearchDropdown.vue'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import {
+  SLASH_COMMANDS,
+  appendComposerInputHistory,
+  canNavigateComposerInputHistory,
+  filterSlashCommands,
+  getComposerInputHistoryStorageKey,
+  moveSlashCommandHighlight,
+  navigateComposerInputHistory,
+  parseComposerInputHistory,
+  resolveSlashCommandTrigger,
+  type SlashCommandDefinition,
+  type SlashCommandName,
+  type SlashCommandTrigger,
+} from './threadComposerInputUtils'
 
 type SkillSourceBadge = {
   badge: string
@@ -478,6 +505,7 @@ export type ThreadComposerExposed = {
   hydrateDraft: (payload: ComposerDraftPayload) => void
   appendTextToDraft: (text: string) => void
   hasUnsavedDraft: () => boolean
+  showNotice: (message: string) => void
 }
 
 const emit = defineEmits<{
@@ -487,6 +515,7 @@ const emit = defineEmits<{
   'update:selected-model': [modelId: string]
   'update:selected-reasoning-effort': [effort: ReasoningEffort | '']
   'update:selected-speed-mode': [mode: SpeedMode]
+  'slash-command': [command: SlashCommandName]
 }>()
 const { t } = useUiLanguage()
 
@@ -565,6 +594,8 @@ const photoLibraryInputRef = ref<HTMLInputElement | null>(null)
 const cameraCaptureInputRef = ref<HTMLInputElement | null>(null)
 const folderPickerInputRef = ref<HTMLInputElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+const modelDropdownRef = ref<{ openMenu: () => void } | null>(null)
+const reasoningDropdownRef = ref<{ openMenu: () => void } | null>(null)
 const { isMobile } = useMobile()
 const isAttachMenuOpen = ref(false)
 const mentionStartIndex = ref<number | null>(null)
@@ -572,6 +603,12 @@ const mentionQuery = ref('')
 const fileMentionSuggestions = ref<ComposerFileSuggestion[]>([])
 const isFileMentionOpen = ref(false)
 const fileMentionHighlightedIndex = ref(0)
+const slashCommandTrigger = ref<SlashCommandTrigger | null>(null)
+const slashCommandHighlightedIndex = ref(0)
+const composerNotice = ref('')
+const composerInputHistory = ref<string[]>([])
+const composerInputHistoryIndex = ref(0)
+const composerInputHistoryDraftSnapshot = ref('')
 const isComposerExpanded = ref(false)
 const isDraftOverflowing = ref(false)
 let composerOverflowMeasurementQueued = false
@@ -581,6 +618,7 @@ let fileMentionDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let isHoldPressActive = false
 let dragDepth = 0
 let attachmentSessionToken = 0
+let composerNoticeTimer: ReturnType<typeof setTimeout> | null = null
 const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
 const DRAFT_STORAGE_PREFIX = 'codex-web-local.thread-draft.v1.'
 let lastActiveThreadId = ''
@@ -607,6 +645,8 @@ const isPlanModeWaitingForModel = computed(() =>
 )
 
 const selectedSkillPaths = computed(() => selectedSkills.value.map((s) => s.path))
+const isSlashCommandOpen = computed(() => slashCommandTrigger.value !== null)
+const slashCommandSuggestions = computed(() => filterSlashCommands(slashCommandTrigger.value?.query ?? ''))
 const skillDropdownOptions = computed(() =>
   [
     ...(props.skills ?? []).map((s) => {
@@ -955,6 +995,11 @@ function buildContextUsageView(
 function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
   const text = draft.value.trim()
   if (!canSubmit.value) return
+  if (text) {
+    composerInputHistory.value = appendComposerInputHistory(composerInputHistory.value, text)
+    persistComposerInputHistory(props.activeThreadId, composerInputHistory.value)
+    resetComposerInputHistoryNavigation()
+  }
   emit('submit', {
     text,
     imageUrls: selectedImages.value.map((image) => image.url),
@@ -968,6 +1013,7 @@ function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
   folderUploadGroups.value = []
   isAttachMenuOpen.value = false
   closeFileMention()
+  closeSlashCommand()
   if (isAndroid || isMobile.value) {
     inputRef.value?.blur()
     return
@@ -1009,6 +1055,43 @@ function clearDraftState(): void {
     skills: [],
   })
   isComposerExpanded.value = false
+}
+
+/** showNotice 在 Composer 上方显示短暂的命令执行结果。 */
+function showNotice(message: string): void {
+  composerNotice.value = message.trim()
+  if (composerNoticeTimer) clearTimeout(composerNoticeTimer)
+  if (!composerNotice.value) return
+  composerNoticeTimer = setTimeout(() => {
+    composerNotice.value = ''
+    composerNoticeTimer = null
+  }, 5000)
+}
+
+/** loadComposerInputHistory 读取当前线程保存的输入历史。 */
+function loadComposerInputHistory(threadId: string): string[] {
+  if (typeof window === 'undefined' || !threadId.trim()) return []
+  try {
+    return parseComposerInputHistory(window.localStorage.getItem(getComposerInputHistoryStorageKey(threadId)))
+  } catch {
+    return []
+  }
+}
+
+/** persistComposerInputHistory 保存当前线程的输入历史。 */
+function persistComposerInputHistory(threadId: string, history: readonly string[]): void {
+  if (typeof window === 'undefined' || !threadId.trim()) return
+  try {
+    window.localStorage.setItem(getComposerInputHistoryStorageKey(threadId), JSON.stringify(history))
+  } catch {
+    // Ignore localStorage failures (quota/private mode).
+  }
+}
+
+/** resetComposerInputHistoryNavigation 退出历史浏览并以当前草稿作为新的起点。 */
+function resetComposerInputHistoryNavigation(): void {
+  composerInputHistoryIndex.value = composerInputHistory.value.length
+  composerInputHistoryDraftSnapshot.value = ''
 }
 
 function getDraftStorageKey(threadId: string): string {
@@ -1549,6 +1632,8 @@ function onInputChange(): void {
   }
   queueComposerOverflowMeasurement()
   updateFileMentionState()
+  updateSlashCommandState()
+  resetComposerInputHistoryNavigation()
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
@@ -1586,6 +1671,72 @@ function onInputKeydown(event: KeyboardEvent): void {
     }
   }
 
+  if (isSlashCommandOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeSlashCommand()
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (slashCommandSuggestions.value.length > 0) {
+        event.preventDefault()
+        slashCommandHighlightedIndex.value = moveSlashCommandHighlight(
+          slashCommandHighlightedIndex.value,
+          slashCommandSuggestions.value.length,
+          event.key === 'ArrowDown' ? 'down' : 'up',
+        )
+        return
+      }
+    }
+    if ((event.key === 'Enter' || event.key === 'Tab') && slashCommandSuggestions.value.length > 0) {
+      event.preventDefault()
+      const selected = slashCommandSuggestions.value[slashCommandHighlightedIndex.value]
+      if (selected) applySlashCommand(selected)
+      return
+    }
+  }
+
+  if (
+    (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+    && !event.altKey
+    && !event.ctrlKey
+    && !event.metaKey
+    && !event.shiftKey
+  ) {
+    const input = inputRef.value
+    const direction = event.key === 'ArrowUp' ? 'up' : 'down'
+    if (
+      input
+      && canNavigateComposerInputHistory(
+        draft.value,
+        input.selectionStart ?? draft.value.length,
+        input.selectionEnd ?? draft.value.length,
+        direction,
+      )
+      && composerInputHistory.value.length > 0
+    ) {
+      event.preventDefault()
+      const result = navigateComposerInputHistory({
+        history: composerInputHistory.value,
+        index: composerInputHistoryIndex.value,
+        draftSnapshot: composerInputHistoryDraftSnapshot.value,
+        currentDraft: draft.value,
+        direction,
+      })
+      composerInputHistoryIndex.value = result.index
+      composerInputHistoryDraftSnapshot.value = result.draftSnapshot
+      draft.value = result.value
+      closeFileMention()
+      closeSlashCommand()
+      queueComposerOverflowMeasurement()
+      void nextTick(() => {
+        const cursor = draft.value.length
+        input.setSelectionRange(cursor, cursor)
+      })
+      return
+    }
+  }
+
   const shouldSend = props.sendWithEnter !== false
     ? event.key === 'Enter' && !event.shiftKey
     : event.key === 'Enter' && (event.metaKey || event.ctrlKey)
@@ -1594,6 +1745,56 @@ function onInputKeydown(event: KeyboardEvent): void {
     onSubmit(props.isTurnInProgress ? activeInProgressMode.value : 'steer')
     return
   }
+}
+
+/** closeSlashCommand 关闭命令候选并重置高亮。 */
+function closeSlashCommand(): void {
+  slashCommandTrigger.value = null
+  slashCommandHighlightedIndex.value = 0
+}
+
+/** updateSlashCommandState 根据当前光标更新命令候选。 */
+function updateSlashCommandState(): void {
+  const input = inputRef.value
+  if (!input || isFileMentionOpen.value) {
+    closeSlashCommand()
+    return
+  }
+  const trigger = resolveSlashCommandTrigger(draft.value, input.selectionStart ?? draft.value.length)
+  slashCommandTrigger.value = trigger
+  slashCommandHighlightedIndex.value = 0
+  if (trigger) closeFileMention()
+}
+
+/** applySlashCommand 清理命令词并执行对应的 Composer 或页面动作。 */
+function applySlashCommand(command: SlashCommandDefinition): void {
+  const trigger = slashCommandTrigger.value
+  if (trigger) {
+    draft.value = `${draft.value.slice(0, trigger.start)}${draft.value.slice(trigger.end)}`.trim()
+  }
+  closeSlashCommand()
+  resetComposerInputHistoryNavigation()
+
+  if (command.name === 'model') {
+    modelDropdownRef.value?.openMenu()
+    return
+  }
+  if (command.name === 'reasoning') {
+    reasoningDropdownRef.value?.openMenu()
+    return
+  }
+  if (command.name === 'plan') {
+    const nextMode = isPlanModeSelected.value ? 'default' : 'plan'
+    emit('update:selected-collaboration-mode', nextMode)
+    showNotice(nextMode === 'plan' ? 'Plan mode enabled.' : 'Plan mode disabled.')
+    return
+  }
+  if (command.name === 'status') {
+    const mode = isPlanModeSelected.value ? 'plan' : 'default'
+    showNotice(`Model: ${props.selectedModel || 'loading'} · Reasoning: ${props.selectedReasoningEffort || 'default'} · Mode: ${mode}`)
+    return
+  }
+  emit('slash-command', command.name)
 }
 
 function closeFileMention(): void {
@@ -1818,6 +2019,7 @@ defineExpose<ThreadComposerExposed>({
   hydrateDraft,
   appendTextToDraft,
   hasUnsavedDraft: () => hasUnsavedDraft.value,
+  showNotice,
 })
 
 onBeforeUnmount(() => {
@@ -1831,6 +2033,9 @@ onBeforeUnmount(() => {
   if (fileMentionDebounceTimer) {
     clearTimeout(fileMentionDebounceTimer)
   }
+  if (composerNoticeTimer) {
+    clearTimeout(composerNoticeTimer)
+  }
 })
 
 watch(
@@ -1841,6 +2046,9 @@ watch(
       persistDraftForThread(lastActiveThreadId, getCurrentDraftPayload())
     }
     clearDraftState()
+    closeSlashCommand()
+    composerInputHistory.value = loadComposerInputHistory(nextThreadId)
+    resetComposerInputHistoryNavigation()
     const restored = loadPersistedDraftForThread(nextThreadId)
     if (restored) {
       replaceDraftState(restored)
@@ -2250,6 +2458,10 @@ watch(
 
 .thread-composer-dictation-error {
   @apply mb-2 px-1 text-xs text-amber-700;
+}
+
+.thread-composer-notice {
+  @apply mb-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700;
 }
 
 .thread-composer-submit {

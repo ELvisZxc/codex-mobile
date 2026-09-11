@@ -688,10 +688,28 @@
               </section>
 
               <div
-                v-if="showCopyResponseButton(message) || showEditMessageButton(message)"
+                v-if="showCopyResponseButton(message) || showCopyUserMessageButton(message) || showEditMessageButton(message) || (message.role === 'user' && message.createdAtMs)"
                 class="message-toolbar"
                 :data-role="message.role"
               >
+                <time
+                  v-if="message.role === 'user' && message.createdAtMs"
+                  class="message-timestamp"
+                  :datetime="new Date(message.createdAtMs).toISOString()"
+                >
+                  {{ formatMessageTime(message.createdAtMs) }}
+                </time>
+                <button
+                  v-if="showCopyUserMessageButton(message)"
+                  type="button"
+                  class="message-copy-button"
+                  :data-copied="copiedUserMessageId === message.id"
+                  :aria-label="copiedUserMessageId === message.id ? 'Question copied' : 'Copy question'"
+                  :title="copiedUserMessageId === message.id ? 'Question copied' : 'Copy question'"
+                  @click="copyUserMessage(message.id)"
+                >
+                  <IconTablerCopy class="icon-svg message-copy-icon" />
+                </button>
                 <button
                   v-if="showEditMessageButton(message)"
                   type="button"
@@ -701,7 +719,6 @@
                   @click="editMessage(message.id)"
                 >
                   <IconTablerFilePencil class="icon-svg message-edit-icon" />
-                  <span class="message-edit-label">Edit message</span>
                 </button>
                 <button
                   v-if="showForkResponseButton(message)"
@@ -1329,6 +1346,7 @@ const conversationListRef = ref<HTMLElement | null>(null)
 const bottomAnchorRef = ref<HTMLElement | null>(null)
 const modalImageUrl = ref('')
 const copiedResponseAnchorId = ref('')
+const copiedUserMessageId = ref('')
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
 const fileChangeActionError = ref<Record<string, string>>({})
 const fileChangeRedoPatchIds = ref<Record<string, string[]>>({})
@@ -1869,6 +1887,10 @@ const forkableTurnIndexByAnchorId = computed<Record<string, number>>(() => {
 
 function showCopyResponseButton(message: UiMessage): boolean {
   return typeof copyableResponseContentByAnchorId.value[message.id] === 'string'
+}
+
+function showCopyUserMessageButton(message: UiMessage): boolean {
+  return message.role === 'user' && message.text.trim().length > 0
 }
 
 function showForkResponseButton(message: UiMessage): boolean {
@@ -3782,6 +3804,35 @@ function formatIsoTime(value: string): string {
   return date.toLocaleTimeString()
 }
 
+async function copyUserMessage(messageId: string): Promise<void> {
+  const message = props.messages.find((item) => item.id === messageId)
+  const content = message?.role === 'user' ? message.text.trim() : ''
+  if (!content) return
+
+  let copied = false
+  try {
+    await copyTextToClipboard(content)
+    copied = true
+  } catch {
+    copied = false
+  }
+  if (!copied) copied = copyTextWithSelectionFallback(content)
+  if (!copied) return
+
+  copiedUserMessageId.value = messageId
+  if (copiedMessageResetTimer) clearTimeout(copiedMessageResetTimer)
+  copiedMessageResetTimer = setTimeout(() => {
+    if (copiedUserMessageId.value === messageId) copiedUserMessageId.value = ''
+    copiedMessageResetTimer = null
+  }, 1800)
+}
+
+function formatMessageTime(value: number): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 function readRequestReason(request: UiServerRequest): string {
   const params = asRecord(request.params)
   const reason = typeof params?.reason === 'string' ? params.reason.trim() : ''
@@ -4668,12 +4719,31 @@ onBeforeUnmount(() => {
   align-self: flex-end;
 }
 
+.message-timestamp {
+  display: block;
+  margin: 0;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.72rem;
+  line-height: 1;
+  text-align: right;
+}
+
 .message-toolbar {
   @apply mt-1 self-start flex items-center gap-1 opacity-[0.01] transition-opacity duration-200;
 }
 
+.message-toolbar[data-role='user'] {
+  @apply self-end;
+}
+
 .message-row:hover .message-toolbar {
   @apply opacity-100;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .message-toolbar {
+    @apply opacity-100;
+  }
 }
 
 .message-copy-button {
@@ -4700,8 +4770,7 @@ onBeforeUnmount(() => {
 }
 
 .message-fork-label,
-.message-copy-label,
-.message-edit-label {
+.message-copy-label {
   @apply leading-none;
 }
 

@@ -1,0 +1,35 @@
+services:
+  codexapp-fork:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codexapp-fork
+    restart: unless-stopped
+    env_file:
+      - ./deploy/codexapp-fork.env
+    environment:
+      NODE_ENV: production
+      HOME: /root
+      CODEX_HOME: /root/.codex
+      SHELL: /bin/bash
+    ports:
+      - "${CODEXAPP_HOST_PORT:-5910}:5900"
+    volumes:
+      - "${CODEXAPP_ROOT_HOME:-./runtime/root-home}:/root"
+      - "${CODEXAPP_WORKSPACE_DIR:-./runtime/workspace}:/workspace"
+      # Read-only SSH credentials for Git operations; never copy keys into the image.
+      - "${CODEXAPP_SSH_DIR:-/root/.ssh}:/root/.ssh:ro"
+    working_dir: /workspace
+    command:
+      - /workspace
+      - --no-tunnel
+      - --no-open
+      - --no-login
+      - --port
+      - "5900"
+      - --password
+      - "${CODEXAPP_PASSWORD:?set CODEXAPP_PASSWORD in deploy/codexapp-fork.env}"
+      - --sandbox-mode
+      - danger-full-access
+      - --approval-policy
+      - never

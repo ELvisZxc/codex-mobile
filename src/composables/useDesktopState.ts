@@ -2544,6 +2544,7 @@ export function useDesktopState() {
       skills: skills.length > 0 ? skills.map((skill) => ({ name: skill.name, path: skill.path })) : undefined,
       fileAttachments: fileAttachments.length > 0 ? fileAttachments.map((file) => ({ ...file })) : undefined,
       messageType: 'userMessage.optimistic',
+      createdAtMs: Date.now(),
     }
     setPersistedMessagesForThread(threadId, [...existing, nextMessage])
   }
@@ -4884,6 +4885,9 @@ export function useDesktopState() {
       persistQueueState()
       return
     }
+
+    // 在服务端回传用户消息前先显示本地发送时间，避免提问后界面没有即时反馈。
+    appendOptimisticUserMessage(threadId, nextText, imageUrls, skills, fileAttachments)
 
     if (isInProgress) {
       shouldAutoScrollOnNextAgentEvent = true

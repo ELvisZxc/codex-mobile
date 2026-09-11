@@ -1115,6 +1115,13 @@ export async function getNotificationCatalog(): Promise<string[]> {
   return fetchRpcNotificationCatalog()
 }
 
+/** compactThread 请求 app-server 压缩指定线程的上下文。 */
+export async function compactThread(threadId: string): Promise<void> {
+  const normalizedThreadId = threadId.trim()
+  if (!normalizedThreadId) throw new Error('Thread ID is required for context compaction.')
+  await callRpc('thread/compact/start', { threadId: normalizedThreadId })
+}
+
 function asAutomation(record: unknown): UiThreadAutomation | null {
   const row = asRecord(record)
   if (!row) return null

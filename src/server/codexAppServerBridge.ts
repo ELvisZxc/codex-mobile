@@ -130,7 +130,7 @@ type ThreadSearchIndex = {
 type ProviderModelsResponse = {
   data: string[]
   providerId: string
-  source: 'provider'
+  source: 'provider' | 'catalog'
 }
 
 type ComposioUserData = {
@@ -2064,6 +2064,16 @@ async function importProjectZip(buffer: Buffer, destinationParent: string): Prom
 
   await persistWorkspaceRoot(projectPath, projectName)
   return { projectPath, importedSessions }
+}
+
+export function buildProviderModelDiscoveryResponse(
+  providerResult: ProviderModelsResponse,
+  catalogIds: string[],
+  providerId: string,
+): ProviderModelsResponse & { exclusive: true } {
+  const normalizedCatalogIds = catalogIds.filter((id, index, ids) => id.length > 0 && ids.indexOf(id) === index)
+  if (providerResult.data.length > 0) return { ...providerResult, providerId, exclusive: true }
+  return { data: normalizedCatalogIds, providerId, source: normalizedCatalogIds.length > 0 ? 'catalog' : 'provider', exclusive: true }
 }
 
 function logProviderModelDiscoveryWarning(message: string, details: Record<string, unknown>): void {
@@ -8409,10 +8419,16 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         try {
           const requestedProvider = url.searchParams.get('provider')?.trim() ?? ''
           if (requestedProvider) {
-            setJson(res, 200, {
-              ...(await readProviderModelIdsForProvider(appServer, requestedProvider)),
-              exclusive: true,
-            })
+            const providerResult = await readProviderModelIdsForProvider(appServer, requestedProvider)
+            let catalogIds: string[] = []
+            if (providerResult.data.length === 0) {
+              try {
+                catalogIds = normalizeProviderModelsData(await appServer.rpc('model/list', {}))
+              } catch {
+                catalogIds = []
+              }
+            }
+            setJson(res, 200, buildProviderModelDiscoveryResponse(providerResult, catalogIds, requestedProvider))
             return
           }
           const fmState = ensureDefaultFreeModeStateForMissingAuthSync(join(getCodexHomeDir(), FREE_MODE_STATE_FILE))
