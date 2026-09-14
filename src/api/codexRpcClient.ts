@@ -55,6 +55,17 @@ export async function rpcCall<T>(method: string, params?: unknown): Promise<T> {
     payload = null
   }
 
+  if (response.status === 401) {
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => window.location.reload(), 0)
+    }
+    throw new CodexApiError('Authentication session expired. Sign in again.', {
+      code: 'authentication_required',
+      method,
+      status: response.status,
+    })
+  }
+
   if (!response.ok) {
     const detail = extractErrorMessage(payload, '') || rawText?.slice(0, 500) || ''
     const prefix = `RPC ${method} failed with HTTP ${response.status}`

@@ -9,6 +9,7 @@ export type CodexErrorCode =
   | 'rpc_error'
   | 'network_error'
   | 'invalid_response'
+  | 'authentication_required'
   | 'unknown_error'
 
 export class CodexApiError extends Error {

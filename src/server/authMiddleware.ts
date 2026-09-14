@@ -285,6 +285,14 @@ export function createAuthSession(password: string): AuthSession {
       }
     }
 
+    if (req.path.startsWith('/codex-api/')) {
+      res.status(401).json({
+        error: 'authentication_required',
+        message: 'Authentication session expired. Sign in again.',
+      })
+      return
+    }
+
     // No valid session — serve login page
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.status(200).send(LOGIN_PAGE_HTML)

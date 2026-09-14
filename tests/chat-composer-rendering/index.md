@@ -43,3 +43,4 @@ Return to the [manual test index](../../tests.md).
 | [New chat live thinking and stop controls](new-chat-live-thinking-and-stop-controls.md) |
 | [Bold URL trailing punctuation parsing](bold-url-trailing-punctuation-parsing.md) |
 | [Slash commands and composer input history](slash-commands-and-input-history.md) |
+- [Authentication session expiry preserves submitted input](auth-session-expiry-preserves-submitted-input.md)

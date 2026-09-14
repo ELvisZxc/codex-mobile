@@ -3417,8 +3417,9 @@ async function syncAfterMobileResume(): Promise<void> {
   }
 }
 
-function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fileAttachments: Array<{ label: string; path: string; fsPath: string }>; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): void {
+async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fileAttachments: Array<{ label: string; path: string; fsPath: string }>; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): Promise<void> {
   const text = payload.text
+  const composer = isHomeRoute.value ? homeThreadComposerRef.value : threadComposerRef.value
   scheduleMobileConversationJumpToLatest()
   const editingState = editingQueuedMessageState.value
   const queueInsertIndex =
@@ -3429,10 +3430,16 @@ function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fil
       : undefined
   editingQueuedMessageState.value = null
   if (isHomeRoute.value) {
-    void submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills, payload.fileAttachments)
+    const submitted = await submitFirstMessageForNewThread(text, payload.imageUrls, payload.skills, payload.fileAttachments)
+    if (submitted) composer?.clearSubmittedDraft()
     return
   }
-  void sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
+  try {
+    await sendMessageToSelectedThread(text, payload.imageUrls, payload.skills, payload.mode, payload.fileAttachments, queueInsertIndex)
+    composer?.clearSubmittedDraft()
+  } catch {
+    // Preserve the composer draft so authentication or transport failures can be retried.
+  }
 }
 
 function onEditQueuedMessage(messageId: string): void {
@@ -4922,7 +4929,7 @@ async function submitFirstMessageForNewThread(
   imageUrls: string[] = [],
   skills: Array<{ name: string; path: string }> = [],
   fileAttachments: Array<{ label: string; path: string; fsPath: string }> = [],
-): Promise<void> {
+): Promise<boolean> {
   try {
     worktreeInitStatus.value = { phase: 'idle', title: '', message: '' }
     let targetCwd = newThreadCwd.value
@@ -4943,7 +4950,7 @@ async function submitFirstMessageForNewThread(
           title: t('Worktree setup failed'),
           message: t('Unable to create worktree. Try again or switch to Local project.'),
         }
-        return
+        return false
       }
     } else if (!targetCwd.trim()) {
       const directory = await createProjectlessThreadDirectory(text)
@@ -4951,11 +4958,13 @@ async function submitFirstMessageForNewThread(
       newThreadCwd.value = directory.cwd
     }
     const threadId = await sendMessageToNewThread(text, targetCwd, imageUrls, skills, fileAttachments)
-    if (!threadId) return
+    if (!threadId) return false
     await router.replace({ name: 'thread', params: { threadId } })
     scheduleMobileConversationJumpToLatest()
+    return true
   } catch {
     // Error is already reflected in state.
+    return false
   }
 }
 

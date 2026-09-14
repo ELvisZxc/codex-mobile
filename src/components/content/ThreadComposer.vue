@@ -505,6 +505,7 @@ export type ThreadComposerExposed = {
   hydrateDraft: (payload: ComposerDraftPayload) => void
   appendTextToDraft: (text: string) => void
   hasUnsavedDraft: () => boolean
+  clearSubmittedDraft: () => void
   showNotice: (message: string) => void
 }
 
@@ -1007,10 +1008,6 @@ function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
     skills: selectedSkills.value.map((s) => ({ name: s.name, path: s.path })),
     mode,
   })
-  clearPersistedDraftForThread(props.activeThreadId)
-  clearDraftState()
-  isComposerExpanded.value = false
-  folderUploadGroups.value = []
   isAttachMenuOpen.value = false
   closeFileMention()
   closeSlashCommand()
@@ -1019,6 +1016,14 @@ function onSubmit(mode: 'steer' | 'queue' = 'steer'): void {
     return
   }
   nextTick(() => inputRef.value?.focus())
+}
+
+/** clearSubmittedDraft 仅在服务端确认接受消息后清理输入。 */
+function clearSubmittedDraft(): void {
+  clearPersistedDraftForThread(props.activeThreadId)
+  clearDraftState()
+  isComposerExpanded.value = false
+  folderUploadGroups.value = []
 }
 
 function setActiveInProgressMode(mode: 'steer' | 'queue'): void {
@@ -2019,6 +2024,7 @@ defineExpose<ThreadComposerExposed>({
   hydrateDraft,
   appendTextToDraft,
   hasUnsavedDraft: () => hasUnsavedDraft.value,
+  clearSubmittedDraft,
   showNotice,
 })
 
