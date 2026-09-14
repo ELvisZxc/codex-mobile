@@ -23,6 +23,10 @@ COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/package.json ./package.json
 RUN npm install --global @openai/codex@0.148.0
 
+# 显式安装单命令代理助手；容器默认保持直连。
+COPY deploy/with-proxy /usr/local/bin/with-proxy
+RUN chmod 0755 /usr/local/bin/with-proxy
+
 ENV NODE_ENV=production \
     HOME=/root \
     CODEX_HOME=/root/.codex \

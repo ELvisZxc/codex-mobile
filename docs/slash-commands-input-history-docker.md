@@ -76,6 +76,9 @@ flowchart TD
 - Docker 使用固定容器名和独立路径，重复 `compose up -d` 更新同一测试实例，不创建无界容器。
 - Compose 的密码只从未纳入 Git 的 `deploy/codexapp-fork.env` 读取；示例文件不含真实凭证。
 - Compose 通过 `CODEXAPP_SSH_DIR` 以只读方式挂载宿主机 SSH 目录到容器 `/root/.ssh`，供 Git SSH 验证使用；私钥不进入镜像。
+- 5910 容器默认直连网络；需要外部代理时执行 `with-proxy <command>`，只影响该命令及其子进程。
+- `with-proxy` 通过 `host.docker.internal:10808` 使用宿主机 Xray，Fastone 域名保留在 `NO_PROXY` 中继续直连。
+- `extra_hosts` 只提供 Docker 网关解析，不改变默认路由，也不强制任何流量走代理。
 
 ## 测试矩阵
 
@@ -91,6 +94,7 @@ flowchart TD
 | TC-008 | 生产 5900 在新容器部署前后不变 | 远端只读核验 |
 | TC-009 | 每线程历史键名和损坏存储降级语义稳定 | `threadComposerInputUtils.test.ts` |
 | TC-010 | compact 使用真实 `thread/compact/start` RPC 契约 | `codexGateway.test.ts` |
+| TC-011 | 默认直连、`with-proxy` 单命令代理且 Fastone 保持直连 | shell 语法检查与容器内网络验收 |
 
 组件级鼠标/触屏操作、Vue 路由切换、`localStorage` 与真实浏览器生命周期接线标记为自动化 `N/A`：仓库当前没有 Vue 组件测试依赖，且本期不新增依赖；这些行为由上述纯逻辑测试、现有类型检查以及 `tests/chat-composer-rendering/slash-commands-and-input-history.md` 的容器内手工验收共同覆盖。
 
