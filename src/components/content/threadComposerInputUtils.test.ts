@@ -9,6 +9,7 @@ import {
   navigateComposerInputHistory,
   parseComposerInputHistory,
   resolveSlashCommandTrigger,
+  shouldNavigateComposerInputHistory,
 } from './threadComposerInputUtils'
 
 describe('composer slash commands', () => {
@@ -82,6 +83,54 @@ describe('composer input history', () => {
       direction: 'down',
     })
     expect(restored).toEqual({ index: 2, draftSnapshot: 'unfinished', value: 'unfinished' })
+  })
+
+  it('only opens history from an empty draft, browsing state, or explicit Alt+ArrowUp', () => {
+    expect(shouldNavigateComposerInputHistory({
+      text: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      direction: 'up',
+      isBrowsing: false,
+      altKey: false,
+      isDraftEmpty: true,
+    })).toBe(true)
+    expect(shouldNavigateComposerInputHistory({
+      text: 'unfinished',
+      selectionStart: 9,
+      selectionEnd: 9,
+      direction: 'up',
+      isBrowsing: false,
+      altKey: false,
+      isDraftEmpty: false,
+    })).toBe(false)
+    expect(shouldNavigateComposerInputHistory({
+      text: 'unfinished',
+      selectionStart: 9,
+      selectionEnd: 9,
+      direction: 'up',
+      isBrowsing: false,
+      altKey: true,
+      isDraftEmpty: false,
+    })).toBe(true)
+    expect(shouldNavigateComposerInputHistory({
+      text: 'history',
+      selectionStart: 7,
+      selectionEnd: 7,
+      direction: 'down',
+      isBrowsing: true,
+      altKey: false,
+      isDraftEmpty: false,
+    })).toBe(true)
+    expect(shouldNavigateComposerInputHistory({
+      text: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      direction: 'down',
+      isBrowsing: false,
+      altKey: false,
+      isDraftEmpty: true,
+    })).toBe(false)
   })
 
   it('only intercepts arrows at logical multiline boundaries without selections or modifiers', () => {

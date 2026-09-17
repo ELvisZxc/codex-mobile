@@ -116,6 +116,32 @@ export function navigateComposerInputHistory(state: ComposerInputHistoryState): 
   }
 }
 
+export type ComposerInputHistoryTriggerState = {
+  text: string
+  selectionStart: number
+  selectionEnd: number
+  direction: 'up' | 'down'
+  isBrowsing: boolean
+  altKey?: boolean
+  isDraftEmpty?: boolean
+}
+
+/** shouldNavigateComposerInputHistory 区分空输入、历史浏览和 Alt 显式触发的方向键语义。 */
+export function shouldNavigateComposerInputHistory(state: ComposerInputHistoryTriggerState): boolean {
+  if (state.selectionStart !== state.selectionEnd) return false
+  if (state.direction === 'up' && state.altKey === true) return true
+
+  const atEditableBoundary = canNavigateComposerInputHistory(
+    state.text,
+    state.selectionStart,
+    state.selectionEnd,
+    state.direction,
+  )
+  if (!state.isBrowsing && state.direction === 'down') return false
+  if (state.direction === 'up' && !state.isBrowsing && state.isDraftEmpty !== true) return false
+  return atEditableBoundary
+}
+
 /** canNavigateComposerInputHistory 仅允许在多行输入边界且没有选区时拦截方向键。 */
 export function canNavigateComposerInputHistory(
   text: string,

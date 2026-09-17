@@ -439,13 +439,13 @@ import SlashCommandMenu from './SlashCommandMenu.vue'
 import {
   SLASH_COMMANDS,
   appendComposerInputHistory,
-  canNavigateComposerInputHistory,
   filterSlashCommands,
   getComposerInputHistoryStorageKey,
   moveSlashCommandHighlight,
   navigateComposerInputHistory,
   parseComposerInputHistory,
   resolveSlashCommandTrigger,
+  shouldNavigateComposerInputHistory,
   type SlashCommandDefinition,
   type SlashCommandName,
   type SlashCommandTrigger,
@@ -1701,6 +1701,18 @@ function onInputKeydown(event: KeyboardEvent): void {
     }
   }
 
+  const inputHistoryIsBrowsing = composerInputHistoryIndex.value < composerInputHistory.value.length
+  if (event.key === 'Escape' && inputHistoryIsBrowsing) {
+    event.preventDefault()
+    const draftSnapshot = composerInputHistoryDraftSnapshot.value
+    resetComposerInputHistoryNavigation()
+    draft.value = draftSnapshot
+    closeFileMention()
+    closeSlashCommand()
+    queueComposerOverflowMeasurement()
+    return
+  }
+
   if (
     (event.key === 'ArrowUp' || event.key === 'ArrowDown')
     && !event.altKey
@@ -1712,13 +1724,16 @@ function onInputKeydown(event: KeyboardEvent): void {
     const direction = event.key === 'ArrowUp' ? 'up' : 'down'
     if (
       input
-      && canNavigateComposerInputHistory(
-        draft.value,
-        input.selectionStart ?? draft.value.length,
-        input.selectionEnd ?? draft.value.length,
-        direction,
-      )
       && composerInputHistory.value.length > 0
+      && shouldNavigateComposerInputHistory({
+        text: draft.value,
+        selectionStart: input.selectionStart ?? draft.value.length,
+        selectionEnd: input.selectionEnd ?? draft.value.length,
+        direction,
+        isBrowsing: inputHistoryIsBrowsing,
+        altKey: event.altKey,
+        isDraftEmpty: draft.value.trim().length === 0,
+      })
     ) {
       event.preventDefault()
       const result = navigateComposerInputHistory({

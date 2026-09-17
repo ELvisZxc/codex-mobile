@@ -13,8 +13,11 @@
 2. Use ArrowUp/ArrowDown, Enter/Tab, Escape, mouse, and touch to operate the command menu.
 3. Verify `/model`, `/reasoning`, `/plan`, `/status`, `/mcp`, and `/review` reach their mapped UI action.
 4. Run `/compact` with an app-server that advertises `thread/compact/start`, then repeat with the method unavailable.
-5. Submit three distinct text prompts, type an unsent draft, and navigate with ArrowUp/ArrowDown.
-6. Repeat history navigation in a multiline draft from the first, middle, and last logical lines.
+5. Submit three distinct text prompts, leave the composer empty, and press ArrowUp to enter history.
+6. Type an unsent draft, verify plain ArrowUp keeps it unchanged, then use Alt+ArrowUp to browse history.
+7. Use Escape or move forward past the newest history entry to restore the unsent draft.
+8. Select a history entry, edit it, and verify the edit remains after moving the cursor or typing.
+9. Repeat multiline checks from the first, middle, and last logical lines.
 7. Switch threads, navigate history, refresh the page, and navigate again.
 8. Type an unknown command and submit it.
 
@@ -24,6 +27,7 @@
 - Command-menu keyboard handling takes priority over history navigation and message sending.
 - Each supported command performs its real UI or RPC action; unavailable compact reports an English error.
 - History is isolated per thread, stores at most 50 submitted text values, and restores the unsent draft after navigating forward.
+- Plain ArrowUp does not replace a non-empty draft; Alt+ArrowUp is required for explicit history access.
 - Unknown commands are sent as ordinary text.
 - The production service on port 5900 keeps the same process and remains responsive.
 
