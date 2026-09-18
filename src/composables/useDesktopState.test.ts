@@ -1195,3 +1195,96 @@ describe('findAdjacentThreadId', () => {
     expect(findAdjacentThreadId([thread('selected-thread', '/tmp/project')], 'selected-thread')).toBe('')
   })
 })
+
+describe('realtime reconnect recovery', () => {
+  it('reconciles an already-loaded selected thread when the notification stream reconnects', async () => {
+    installTestWindow()
+    let notificationHandler: ((notification: { method: string; params?: unknown }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notificationHandler = handler as typeof notificationHandler
+      return vi.fn()
+    })
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{
+        projectName: 'Project',
+        threads: [thread('thread-1', '/tmp/project')],
+      }],
+      nextCursor: null,
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail
+      .mockResolvedValueOnce({
+        messages: [{ id: 'user-1', role: 'user', text: 'hi', messageType: 'userMessage' }],
+        inProgress: true,
+        activeTurnId: 'turn-1',
+        hasMoreOlder: false,
+        turnIndexByTurnId: {},
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { id: 'user-1', role: 'user', text: 'hi', messageType: 'userMessage' },
+          { id: 'assistant-1', role: 'assistant', text: 'done', messageType: 'agentMessage' },
+        ],
+        inProgress: false,
+        activeTurnId: '',
+        hasMoreOlder: false,
+        turnIndexByTurnId: {},
+      })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-1')
+    await state.refreshAll({ includeSelectedThreadMessages: false })
+    await state.loadMessages('thread-1')
+    state.startPolling()
+    expect(notificationHandler).toBeDefined()
+    notificationHandler!({ method: 'ready', params: { ok: true } })
+
+    await vi.waitFor(() => {
+      expect(gatewayMocks.getThreadGroupsPage).toHaveBeenCalledTimes(2)
+      expect(gatewayMocks.getThreadDetail).toHaveBeenCalledTimes(2)
+      expect(state.messages.value.map((message) => message.text)).toEqual(['hi', 'done'])
+    })
+  })
+
+  it('reconciles the selected thread through the explicit realtime recovery entry point', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{
+        projectName: 'Project',
+        threads: [thread('thread-1', '/tmp/project')],
+      }],
+      nextCursor: null,
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail
+      .mockResolvedValueOnce({
+        messages: [{ id: 'user-1', role: 'user', text: 'hi', messageType: 'userMessage' }],
+        inProgress: true,
+        activeTurnId: 'turn-1',
+        hasMoreOlder: false,
+        turnIndexByTurnId: {},
+      })
+      .mockResolvedValueOnce({
+        messages: [
+          { id: 'user-1', role: 'user', text: 'hi', messageType: 'userMessage' },
+          { id: 'assistant-1', role: 'assistant', text: 'done', messageType: 'agentMessage' },
+        ],
+        inProgress: false,
+        activeTurnId: '',
+        hasMoreOlder: false,
+        turnIndexByTurnId: {},
+      })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-1')
+    await state.refreshAll({ includeSelectedThreadMessages: false })
+    await state.loadMessages('thread-1')
+    await state.reconcileRealtimeState()
+
+    expect(gatewayMocks.getThreadGroupsPage).toHaveBeenCalledTimes(2)
+    expect(gatewayMocks.getThreadDetail).toHaveBeenCalledTimes(2)
+    expect(state.messages.value.map((message) => message.text)).toEqual(['hi', 'done'])
+  })
+})
