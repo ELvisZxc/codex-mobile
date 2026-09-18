@@ -4360,7 +4360,8 @@ export function useDesktopState() {
     await loadThreadsPromise
   }
 
-  async function loadMessages(threadId: string, options: { silent?: boolean } = {}) {
+  // loadMessages 从 app-server 回读线程消息，并允许恢复流程绕过短时缓存。
+  async function loadMessages(threadId: string, options: { silent?: boolean; force?: boolean } = {}) {
     if (!threadId) {
       return
     }
@@ -4389,6 +4390,7 @@ export function useDesktopState() {
       const loadedRecently =
         Date.now() - (lastMessageLoadAtByThreadId.get(threadId) ?? 0) < RECENT_THREAD_MESSAGE_LOAD_REUSE_MS
       const canReuseLoadedMessages =
+        options.force !== true &&
         alreadyLoaded &&
         (
           loadedRecently ||
@@ -5487,7 +5489,7 @@ export function useDesktopState() {
         (shouldRefreshThreads && loadedMessagesByThreadId.value[activeThreadId] !== true)
 
       if (shouldRefreshActiveThread) {
-        await loadMessages(activeThreadId, { silent: true })
+        await loadMessages(activeThreadId, { silent: true, force: true })
       }
     } catch {
       // Keep UI stable on transient event sync failures.
@@ -5507,16 +5509,19 @@ export function useDesktopState() {
     }
   }
 
-  async function recoverBridgeState(): Promise<void> {
-    await loadPendingServerRequestsFromBridge()
-    pendingThreadsRefresh = !hasLoadedThreads.value
-    if (
-      selectedThreadId.value &&
-      loadedMessagesByThreadId.value[selectedThreadId.value] !== true
-    ) {
+  // reconcileRealtimeState 强制回读线程列表和当前会话，修复通知流短暂中断后的本地状态。
+  async function reconcileRealtimeState(): Promise<void> {
+    pendingThreadsRefresh = true
+    pendingThreadsRefreshForce = true
+    if (selectedThreadId.value) {
       pendingThreadMessageRefresh.add(selectedThreadId.value)
     }
     await syncFromNotifications()
+  }
+
+  async function recoverBridgeState(): Promise<void> {
+    await loadPendingServerRequestsFromBridge()
+    await reconcileRealtimeState()
   }
 
   function startPolling(): void {
@@ -5699,6 +5704,7 @@ export function useDesktopState() {
     error,
     refreshAll,
     refreshSkills,
+    reconcileRealtimeState,
     selectThread,
     loadMessages,
     loadOlderMessages,

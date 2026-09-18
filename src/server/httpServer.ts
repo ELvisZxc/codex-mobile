@@ -8,6 +8,7 @@ import { createCodexBridgeMiddleware } from './codexAppServerBridge.js'
 import { createAuthSession } from './authMiddleware.js'
 import { createDirectoryListingHtml, createTextEditorHtml, decodeBrowsePath, getLocalDirectoryListing, isTextEditableFile, normalizeLocalPath } from './localBrowseUi.js'
 import { WebSocketServer, type WebSocket } from 'ws'
+import { startWebSocketHeartbeat } from './webSocketHeartbeat.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const distDir = join(__dirname, '..', 'dist')
@@ -254,6 +255,8 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     dispose: () => bridge.dispose(),
     attachWebSocket: (server: HttpServer) => {
       const wss = new WebSocketServer({ noServer: true })
+      const heartbeat = startWebSocketHeartbeat(wss)
+      server.on('close', heartbeat.stop)
 
       server.on('upgrade', (req: IncomingMessage, socket, head) => {
         const url = new URL(req.url ?? '', 'http://localhost')
@@ -273,14 +276,19 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       })
 
       wss.on('connection', (ws: WebSocket) => {
+        heartbeat.track(ws)
         ws.send(JSON.stringify({ method: 'ready', params: { ok: true }, atIso: new Date().toISOString() }))
         const unsubscribe = bridge.subscribeNotifications((notification) => {
           if (ws.readyState !== 1) return
           ws.send(JSON.stringify(notification))
         })
+        const cleanup = () => {
+          heartbeat.untrack(ws)
+          unsubscribe()
+        }
 
-        ws.on('close', unsubscribe)
-        ws.on('error', unsubscribe)
+        ws.on('close', cleanup)
+        ws.on('error', cleanup)
       })
     },
   }

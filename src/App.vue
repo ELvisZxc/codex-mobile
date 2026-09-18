@@ -1443,6 +1443,7 @@ const {
   error: desktopError,
   refreshAll,
   refreshSkills,
+  reconcileRealtimeState,
   selectThread,
   ensureThreadMessagesLoaded,
   loadOlderMessages,
@@ -1620,7 +1621,7 @@ const DICTATION_AUTO_SEND_KEY = 'codex-web-local.dictation-auto-send.v1'
 const DICTATION_LANGUAGE_KEY = 'codex-web-local.dictation-language.v1'
 
 const CHAT_WIDTH_KEY = 'codex-web-local.chat-width.v1'
-const MOBILE_RESUME_RELOAD_MIN_HIDDEN_MS = 400
+const RESUME_RECONCILE_MIN_HIDDEN_MS = 400
 const sendWithEnter = ref(loadBoolPref(SEND_WITH_ENTER_KEY, true))
 const inProgressSendMode = ref<'steer' | 'queue'>(loadInProgressSendModePref())
 const darkMode = ref<'system' | 'light' | 'dark'>(loadDarkModePref())
@@ -1716,9 +1717,9 @@ const telegramStatus = ref<TelegramStatus>({
   allowAllUsers: false,
   lastError: '',
 })
-const mobileHiddenAtMs = ref<number | null>(null)
-const mobileResumeReloadTriggered = ref(false)
-const mobileResumeSyncInProgress = ref(false)
+const pageHiddenAtMs = ref<number | null>(null)
+const resumeReconcileTriggered = ref(false)
+const resumeReconcileInProgress = ref(false)
 const visualViewportHeight = ref(typeof window !== 'undefined' ? window.visualViewport?.height ?? window.innerHeight : 0)
 const visualViewportOffsetTop = ref(typeof window !== 'undefined' ? window.visualViewport?.offsetTop ?? 0 : 0)
 const layoutViewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0)
@@ -2133,6 +2134,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onDocumentVisibilityChange)
   window.addEventListener('pageshow', onWindowPageShow)
   window.addEventListener('focus', onWindowFocus)
+  window.addEventListener('online', onWindowOnline)
   window.addEventListener('resize', updateVisualViewportState)
   window.visualViewport?.addEventListener('resize', updateVisualViewportState)
   window.visualViewport?.addEventListener('scroll', updateVisualViewportState)
@@ -2167,6 +2169,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange)
   window.removeEventListener('pageshow', onWindowPageShow)
   window.removeEventListener('focus', onWindowFocus)
+  window.removeEventListener('online', onWindowOnline)
   window.removeEventListener('resize', updateVisualViewportState)
   window.visualViewport?.removeEventListener('resize', updateVisualViewportState)
   window.visualViewport?.removeEventListener('scroll', updateVisualViewportState)
@@ -3363,20 +3366,19 @@ function onSettingsAreaClick(event: MouseEvent): void {
 
 function onDocumentVisibilityChange(): void {
   if (typeof document === 'undefined') return
-  if (!isMobile.value) return
 
   if (document.visibilityState === 'hidden') {
-    mobileHiddenAtMs.value = Date.now()
-    mobileResumeReloadTriggered.value = false
+    pageHiddenAtMs.value = Date.now()
+    resumeReconcileTriggered.value = false
     return
   }
 
-  maybeSyncAfterMobileResume()
+  maybeReconcileAfterResume()
 }
 
 function onWindowPageShow(event: PageTransitionEvent): void {
   if (!event.persisted) return
-  maybeSyncAfterMobileResume()
+  maybeReconcileAfterResume()
 }
 
 function onWindowFocus(): void {
@@ -3384,37 +3386,27 @@ function onWindowFocus(): void {
     void loadWorkspaceRootOptionsState()
     void refreshDefaultProjectName()
   }
-  maybeSyncAfterMobileResume()
+  maybeReconcileAfterResume()
 }
 
-function maybeSyncAfterMobileResume(): void {
+// onWindowOnline 在浏览器恢复网络后触发一次轻量状态对账。
+function onWindowOnline(): void {
+  void reconcileRealtimeState()
+}
+
+// maybeReconcileAfterResume 处理页面从后台恢复后的通知流状态校准。
+function maybeReconcileAfterResume(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return
-  if (!isMobile.value) return
   if (document.visibilityState !== 'visible') return
-  if (mobileResumeReloadTriggered.value) return
-  if (mobileHiddenAtMs.value === null) return
+  if (resumeReconcileTriggered.value) return
+  if (pageHiddenAtMs.value === null) return
 
-  const hiddenForMs = Date.now() - mobileHiddenAtMs.value
-  if (hiddenForMs < MOBILE_RESUME_RELOAD_MIN_HIDDEN_MS) return
+  const hiddenForMs = Date.now() - pageHiddenAtMs.value
+  if (hiddenForMs < RESUME_RECONCILE_MIN_HIDDEN_MS) return
 
-  mobileResumeReloadTriggered.value = true
-  mobileHiddenAtMs.value = null
-  void syncAfterMobileResume()
-}
-
-async function syncAfterMobileResume(): Promise<void> {
-  if (mobileResumeSyncInProgress.value) return
-  mobileResumeSyncInProgress.value = true
-
-  try {
-    await refreshAll({
-      includeSelectedThreadMessages: true,
-      awaitAncillaryRefreshes: true,
-    })
-    await syncThreadSelectionWithRoute()
-  } finally {
-    mobileResumeSyncInProgress.value = false
-  }
+  resumeReconcileTriggered.value = true
+  pageHiddenAtMs.value = null
+  void reconcileRealtimeState()
 }
 
 async function onSubmitThreadMessage(payload: { text: string; imageUrls: string[]; fileAttachments: Array<{ label: string; path: string; fsPath: string }>; skills: Array<{ name: string; path: string }>; mode: 'steer' | 'queue' }): Promise<void> {

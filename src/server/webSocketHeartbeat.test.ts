@@ -2,15 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { startWebSocketHeartbeat, type HeartbeatSocket, type HeartbeatServer } from './webSocketHeartbeat'
 
 function socket(): HeartbeatSocket & { pongHandler?: () => void } {
-  const value = {
-    readyState: 1,
-    ping: vi.fn(),
-    terminate: vi.fn(),
-    on: vi.fn((event: string, handler: () => void) => {
-      if (event === 'pong') value.pongHandler = handler
-      return value
-    }),
-  }
+  const value = {} as HeartbeatSocket & { pongHandler?: () => void }
+  value.readyState = 1
+  value.ping = vi.fn()
+  value.terminate = vi.fn()
+  value.on = vi.fn((event: string, handler: () => void) => {
+    if (event === 'pong') value.pongHandler = handler
+    return value
+  })
   return value
 }
 
