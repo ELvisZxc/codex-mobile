@@ -15,6 +15,17 @@ describe('isolated Docker runtime', () => {
     expect(dockerfile).toContain('HEALTHCHECK')
   })
 
+  it('installs the Docker CLI without starting a nested daemon', () => {
+    const dockerfile = readRepositoryFile('Dockerfile')
+    expect(dockerfile).toContain('apt-get install -y --no-install-recommends docker.io')
+    expect(dockerfile).not.toContain('dockerd')
+  })
+
+  it('mounts the host Docker socket for project test commands', () => {
+    const compose = readRepositoryFile('compose.yaml')
+    expect(compose).toContain('/var/run/docker.sock:/var/run/docker.sock')
+  })
+
   it('uses a dedicated container, port, Codex home, and workspace', () => {
     const compose = readRepositoryFile('compose.yaml')
     expect(compose).toContain('codexapp-fork')
@@ -22,7 +33,7 @@ describe('isolated Docker runtime', () => {
     expect(compose).toContain('/root')
     expect(compose).toContain('/workspace')
     expect(compose).toContain('${CODEXAPP_SSH_DIR:-/root/.ssh}:/root/.ssh:ro')
-    expect(compose).not.toContain('/var/run/docker.sock')
+    expect(compose).toContain('/var/run/docker.sock:/var/run/docker.sock')
     expect(compose).not.toContain('--no-password')
   })
 })
