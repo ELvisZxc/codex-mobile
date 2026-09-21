@@ -17,6 +17,10 @@ FROM node:22-bookworm AS runtime
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends docker.io docker-compose \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /build/dist ./dist
 COPY --from=build /build/dist-cli ./dist-cli
 COPY --from=build /build/node_modules ./node_modules

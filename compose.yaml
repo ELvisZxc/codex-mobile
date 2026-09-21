@@ -22,6 +22,8 @@ services:
       - "${CODEXAPP_WORKSPACE_DIR:-./runtime/workspace}:/workspace"
       # Read-only SSH credentials for Git operations; never copy keys into the image.
       - "${CODEXAPP_SSH_DIR:-/root/.ssh}:/root/.ssh:ro"
+      # Allow project tests in 5910 to invoke the host Docker daemon.
+      - "/var/run/docker.sock:/var/run/docker.sock"
     working_dir: /workspace
     command:
       - /workspace
