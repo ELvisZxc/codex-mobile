@@ -649,6 +649,55 @@ describe('live error overlay', () => {
     })
   })
 
+  it('exposes the live turn start time and freezes the completed duration', async () => {
+    installTestWindow()
+    let notificationHandler: (notification: { method: string; params?: unknown; atIso?: string }) => void = () => {}
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notificationHandler = handler
+      return vi.fn()
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-live-duration')
+    await state.loadMessages('thread-live-duration')
+    state.startPolling()
+
+    notificationHandler({
+      method: 'turn/started',
+      atIso: '2026-09-22T09:24:00.000Z',
+      params: {
+        threadId: 'thread-live-duration',
+        turn: { id: 'turn-live', status: 'inProgress' },
+      },
+    })
+
+    expect(state.selectedLiveOverlay.value).toMatchObject({
+      startedAtMs: Date.parse('2026-09-22T09:24:00.000Z'),
+    })
+
+    notificationHandler({
+      method: 'turn/completed',
+      atIso: '2026-09-22T09:25:02.000Z',
+      params: {
+        threadId: 'thread-live-duration',
+        durationMs: 62_000,
+        turn: { id: 'turn-live', status: 'completed' },
+      },
+    })
+
+    expect(state.selectedLiveOverlay.value).toBeNull()
+    expect(state.messages.value.at(-1)?.text).toBe('已处理 1分钟 2秒')
+  })
+
   it('keeps a new live error visible when an older persisted turn error exists', async () => {
     installTestWindow()
     let notificationHandler: (notification: { method: string; params?: unknown }) => void = () => {}
