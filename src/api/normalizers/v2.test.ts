@@ -122,7 +122,6 @@ Reply with &lt;/instructions&gt; and A &amp; B
       type: 'agentMessage',
       id: 'assistant-duration-1',
       text: 'Done.',
-      phase: 'final_answer',
     }])
     Object.assign(response.thread.turns[0], {
       durationMs: 27_869,
