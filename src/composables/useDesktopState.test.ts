@@ -1139,6 +1139,58 @@ describe('provider model selection', () => {
     ])
   })
 
+  it('keeps historical turn durations when a newer completion arrives', async () => {
+    installTestWindow()
+    vi.mocked(window.setTimeout).mockImplementation(((callback: TimerHandler) => {
+      if (typeof callback === 'function') {
+        void Promise.resolve().then(() => callback())
+      }
+      return 1
+    }) as typeof window.setTimeout)
+    let notificationHandler: ((notification: { method: string; params?: unknown }) => void) | undefined
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notificationHandler = handler as typeof notificationHandler
+      return vi.fn()
+    })
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{ projectName: 'Project', threads: [thread('duration-thread', '/tmp/project')] }],
+      nextCursor: null,
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      messages: [
+        { id: 'assistant-old', role: 'assistant', text: 'Old answer', messageType: 'agentMessage', turnId: 'turn-old' },
+        { id: 'turn-summary:turn-old', role: 'system', text: 'Worked for 2s', messageType: 'worked', turnId: 'turn-old' },
+        { id: 'assistant-new', role: 'assistant', text: 'New answer', messageType: 'agentMessage', turnId: 'turn-new' },
+      ],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('duration-thread')
+    await state.loadMessages('duration-thread')
+    state.startPolling()
+    notificationHandler!({
+      method: 'turn/completed',
+      params: {
+        threadId: 'duration-thread',
+        durationMs: 5000,
+        turn: { id: 'turn-new', status: 'completed' },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(state.messages.value.filter((message) => message.messageType === 'worked').map((message) => message.text)).toEqual([
+        'Worked for 2s',
+        'Worked for 5s',
+      ])
+    })
+  })
+
   it('surfaces selected thread load failures and still refreshes models', async () => {
     installTestWindow()
     gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })

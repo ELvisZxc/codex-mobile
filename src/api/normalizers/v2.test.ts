@@ -117,6 +117,49 @@ Reply with &lt;/instructions&gt; and A &amp; B
     })
   })
 
+  it('restores a completed turn duration from thread history', () => {
+    const response = threadReadResponseWithContent([{
+      type: 'agentMessage',
+      id: 'assistant-duration-1',
+      text: 'Done.',
+      phase: 'final_answer',
+    }])
+    Object.assign(response.thread.turns[0], {
+      durationMs: 27_869,
+      startedAt: 1_790_061_945,
+      completedAt: 1_790_061_973,
+    })
+
+    const messages = normalizeThreadMessagesV2(response)
+
+    expect(messages.at(-1)).toMatchObject({
+      id: 'turn-summary:turn-1',
+      role: 'system',
+      text: 'Worked for 28s',
+      messageType: 'worked',
+      turnId: 'turn-1',
+      turnIndex: 0,
+    })
+  })
+
+  it('derives a completed turn duration from numeric timestamps', () => {
+    const response = threadReadResponseWithContent([])
+    Object.assign(response.thread.turns[0], {
+      startedAt: 100,
+      completedAt: 164,
+    })
+
+    const messages = normalizeThreadMessagesV2(response)
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        id: 'turn-summary:turn-1',
+        text: 'Worked for 1m 4s',
+        messageType: 'worked',
+      }),
+    ])
+  })
+
   it('renders failed turn errors as chat system messages', () => {
     const response = threadReadResponseWithContent([{
       type: 'userMessage',
