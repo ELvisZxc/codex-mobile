@@ -60,7 +60,7 @@ import type {
   UiThread,
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
-import { formatTurnDuration, WORKED_MESSAGE_TYPE } from '../utils/turnDuration.js'
+import { formatProcessedDuration, WORKED_MESSAGE_TYPE } from '../utils/turnDuration.js'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
   return groups.flatMap((group) => group.threads)
@@ -861,7 +861,7 @@ function buildTurnSummaryMessage(summary: TurnSummaryState): UiMessage {
   return {
     id: `turn-summary:${summary.turnId}`,
     role: 'system',
-    text: `Worked for ${formatTurnDuration(summary.durationMs)}`,
+    text: formatProcessedDuration(summary.durationMs),
     messageType: WORKED_MESSAGE_TYPE,
     turnId: summary.turnId,
   }
@@ -1437,6 +1437,7 @@ export function useDesktopState() {
   const turnActivityByThreadId = ref<Record<string, TurnActivityState>>({})
   const turnErrorByThreadId = ref<Record<string, TurnErrorState>>({})
   const activeTurnIdByThreadId = ref<Record<string, string>>({})
+  const turnStartedAtByThreadId = ref<Record<string, number>>({})
   const interruptBlockedUntilPersistedByThreadId = ref<Record<string, boolean>>({})
   const threadListedByServerById = ref<Record<string, boolean>>({})
   const persistedUserMessageByThreadId = ref<Record<string, boolean>>({})
@@ -1574,6 +1575,7 @@ export function useDesktopState() {
 
     if (!isInProgress && !activity && !reasoningText && !errorText) return null
     return {
+      startedAtMs: isInProgress ? turnStartedAtByThreadId.value[threadId] : undefined,
       activityLabel: activity?.label || 'Thinking',
       activityDetails: activity?.details ?? [],
       reasoningText,
@@ -1868,6 +1870,7 @@ export function useDesktopState() {
         label: 'Thinking',
         details: buildPendingTurnDetails(MODEL_FALLBACK_ID, pending.effort, pending.collaborationMode),
       })
+      setTurnStartedAtForThread(threadId, Date.now())
       setThreadInProgress(threadId, true)
 
       if (resumedThreadById.value[threadId] !== true) {
@@ -2245,6 +2248,7 @@ export function useDesktopState() {
     turnActivityByThreadId.value = pruneThreadStateMap(turnActivityByThreadId.value, activeThreadIds)
     turnErrorByThreadId.value = pruneThreadStateMap(turnErrorByThreadId.value, activeThreadIds)
     activeTurnIdByThreadId.value = pruneThreadStateMap(activeTurnIdByThreadId.value, activeThreadIds)
+    turnStartedAtByThreadId.value = pruneThreadStateMap(turnStartedAtByThreadId.value, activeThreadIds)
     interruptBlockedUntilPersistedByThreadId.value = pruneThreadStateMap(
       interruptBlockedUntilPersistedByThreadId.value,
       activeThreadIds,
@@ -2301,6 +2305,20 @@ export function useDesktopState() {
     }
   }
 
+  function setTurnStartedAtForThread(threadId: string, startedAtMs: number | null): void {
+    if (!threadId) return
+    if (typeof startedAtMs === 'number' && Number.isFinite(startedAtMs)) {
+      turnStartedAtByThreadId.value = {
+        ...turnStartedAtByThreadId.value,
+        [threadId]: startedAtMs,
+      }
+      return
+    }
+    if (turnStartedAtByThreadId.value[threadId] !== undefined) {
+      turnStartedAtByThreadId.value = omitKey(turnStartedAtByThreadId.value, threadId)
+    }
+  }
+
   function setThreadInProgress(threadId: string, nextInProgress: boolean): void {
     if (!threadId) return
     const currentValue = inProgressById.value[threadId] === true
@@ -2312,6 +2330,7 @@ export function useDesktopState() {
       }
     } else {
       inProgressById.value = omitKey(inProgressById.value, threadId)
+      setTurnStartedAtForThread(threadId, null)
       clearCompletedTurnLiveState(threadId)
       clearInterruptPersistenceGate(threadId)
     }
@@ -3762,6 +3781,7 @@ export function useDesktopState() {
     const startedTurn = readTurnStartedInfo(notification)
     if (startedTurn) {
       pendingTurnStartsById.set(startedTurn.turnId, startedTurn)
+      setTurnStartedAtForThread(startedTurn.threadId, startedTurn.startedAtMs)
       setTurnIndexForThread(startedTurn.threadId, startedTurn.turnId, inferNextTurnIndex(startedTurn.threadId))
       activeTurnIdByThreadId.value = {
         ...activeTurnIdByThreadId.value,
@@ -4443,6 +4463,16 @@ export function useDesktopState() {
           [threadId]: version,
         }
       }
+      if (inProgress && turnStartedAtByThreadId.value[threadId] === undefined) {
+        let restoredStartedAtMs: number | null = null
+        for (let index = mergedMessages.length - 1; index >= 0; index -= 1) {
+          const message = mergedMessages[index]
+          if (message.role !== 'user' || typeof message.createdAtMs !== 'number') continue
+          restoredStartedAtMs = message.createdAtMs
+          break
+        }
+        setTurnStartedAtForThread(threadId, restoredStartedAtMs ?? Date.now())
+      }
       setThreadInProgress(threadId, inProgress)
       clearTransientTurnErrorForThread(threadId)
       if (activeTurnId) {
@@ -4911,6 +4941,7 @@ export function useDesktopState() {
       },
     )
     setTurnErrorForThread(threadId, null)
+    setTurnStartedAtForThread(threadId, Date.now())
     setThreadInProgress(threadId, true)
 
     try {
@@ -4995,6 +5026,7 @@ export function useDesktopState() {
         },
       )
       setTurnErrorForThread(threadId, null)
+      setTurnStartedAtForThread(threadId, Date.now())
       setThreadInProgress(threadId, true)
       const capturedThreadId = threadId
       const capturedCwd = targetCwd || null
@@ -5590,6 +5622,7 @@ export function useDesktopState() {
     turnSummaryByThreadId.value = {}
     turnErrorByThreadId.value = {}
     activeTurnIdByThreadId.value = {}
+    turnStartedAtByThreadId.value = {}
     interruptBlockedUntilPersistedByThreadId.value = {}
     threadListedByServerById.value = {}
     persistedUserMessageByThreadId.value = {}

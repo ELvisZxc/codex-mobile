@@ -132,7 +132,7 @@ Reply with &lt;/instructions&gt; and A &amp; B
     const messages = normalizeThreadMessagesV2(response)
 
     expect(messages.map((message) => `${message.role}:${message.text}`)).toEqual([
-      'system:Worked for 28s',
+      'system:已处理 28秒',
       'assistant:Done.',
     ])
     expect(messages[0]).toMatchObject({
@@ -155,7 +155,7 @@ Reply with &lt;/instructions&gt; and A &amp; B
     expect(messages).toEqual([
       expect.objectContaining({
         id: 'turn-summary:turn-1',
-        text: 'Worked for 1m 4s',
+        text: '已处理 1分钟 4秒',
         messageType: 'worked',
       }),
     ])

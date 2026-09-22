@@ -1183,7 +1183,7 @@ describe('provider model selection', () => {
     expect(gatewayMocks.getThreadDetail).toHaveBeenCalledWith('mini-thread')
     expect(state.messages.value.map((message) => `${message.role}:${message.text}`)).toEqual([
       'user:hi',
-      'system:Worked for <1s',
+      'system:已处理 0秒',
       'assistant:Hi.',
     ])
   })
@@ -1210,7 +1210,7 @@ describe('provider model selection', () => {
     gatewayMocks.getThreadDetail.mockResolvedValue({
       messages: [
         { id: 'assistant-old', role: 'assistant', text: 'Old answer', messageType: 'agentMessage', turnId: 'turn-old' },
-        { id: 'turn-summary:turn-old', role: 'system', text: 'Worked for 2s', messageType: 'worked', turnId: 'turn-old' },
+        { id: 'turn-summary:turn-old', role: 'system', text: '已处理 2秒', messageType: 'worked', turnId: 'turn-old' },
         { id: 'assistant-new', role: 'assistant', text: 'New answer', messageType: 'agentMessage', turnId: 'turn-new' },
       ],
       inProgress: false,
@@ -1234,8 +1234,8 @@ describe('provider model selection', () => {
 
     await vi.waitFor(() => {
       expect(state.messages.value.filter((message) => message.messageType === 'worked').map((message) => message.text)).toEqual([
-        'Worked for 2s',
-        'Worked for 5s',
+        '已处理 2秒',
+        '已处理 5秒',
       ])
     })
   })

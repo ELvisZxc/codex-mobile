@@ -16,7 +16,7 @@
 
 | ID | Requirement | Contract test | Acceptance |
 |---|---|---|---|
-| TD-001 | Refresh restores the duration from turn history | `normalizers/v2.test.ts` duration case | A completed turn with `durationMs: 27869` renders `Worked for 28s` |
+| TD-001 | Refresh restores the duration from turn history | `normalizers/v2.test.ts` duration case | A completed turn with `durationMs: 27869` renders `已处理 28秒` |
 | TD-002 | Older app-server payloads remain supported | `normalizers/v2.test.ts` timestamp fallback case | Numeric start/end timestamps produce the duration |
 | TD-003 | Realtime completion preserves older summaries | `useDesktopState.test.ts` multi-turn case | Adding the newest duration does not remove previous turn durations |
 

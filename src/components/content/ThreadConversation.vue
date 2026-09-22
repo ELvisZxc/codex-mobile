@@ -27,6 +27,13 @@
         :data-role="message.role"
         :data-message-type="message.messageType || ''"
       >
+        <time
+          v-if="message.role === 'user' && message.createdAtMs"
+          class="conversation-message-time"
+          :datetime="new Date(message.createdAtMs).toISOString()"
+        >
+          {{ formatConversationTimestamp(message.createdAtMs) }}
+        </time>
         <div v-if="isCommandMessage(message)" class="message-row" data-role="system">
           <div class="message-stack" data-role="system">
             <button
@@ -269,10 +276,8 @@
                 </div>
                 <div v-if="message.messageType === 'worked'" class="worked-separator-wrap" aria-live="polite">
                   <button type="button" class="worked-separator" @click="toggleWorkedExpand(message)">
-                    <span class="worked-separator-line" aria-hidden="true" />
                     <span class="worked-chevron" :class="{ 'worked-chevron-open': isWorkedExpanded(message) }">▶</span>
                     <p class="worked-separator-text">{{ message.text }}</p>
-                    <span class="worked-separator-line" aria-hidden="true" />
                   </button>
                   <div v-if="isWorkedExpanded(message)" class="worked-details">
                     <div
@@ -688,17 +693,10 @@
               </section>
 
               <div
-                v-if="showCopyResponseButton(message) || showCopyUserMessageButton(message) || showEditMessageButton(message) || (message.role === 'user' && message.createdAtMs)"
+                v-if="showCopyResponseButton(message) || showCopyUserMessageButton(message) || showEditMessageButton(message)"
                 class="message-toolbar"
                 :data-role="message.role"
               >
-                <time
-                  v-if="message.role === 'user' && message.createdAtMs"
-                  class="message-timestamp"
-                  :datetime="new Date(message.createdAtMs).toISOString()"
-                >
-                  {{ formatMessageTime(message.createdAtMs) }}
-                </time>
                 <button
                   v-if="showCopyUserMessageButton(message)"
                   type="button"
@@ -753,6 +751,7 @@
         <div class="message-row">
           <div class="message-stack">
             <article class="live-overlay-inline" aria-live="polite">
+              <p v-if="liveProcessedDuration" class="live-overlay-duration">{{ liveProcessedDuration }}</p>
               <p class="live-overlay-label">{{ liveOverlay.activityLabel }}</p>
               <p
                 v-if="liveOverlay.reasoningText"
@@ -940,6 +939,7 @@ import { updateThreadFileChanges } from '../../api/codexGateway'
 import { useFeedbackDiagnostics } from '../../composables/useFeedbackDiagnostics'
 import { useMobile } from '../../composables/useMobile'
 import { copyTextToClipboard, copyTextWithSelectionFallback } from '../../utils/clipboard'
+import { formatConversationTimestamp, formatProcessedDuration } from '../../utils/turnDuration'
 
 import IconTablerArrowBackUp from '../icons/IconTablerArrowBackUp.vue'
 import IconTablerArrowUp from '../icons/IconTablerArrowUp.vue'
@@ -1350,6 +1350,8 @@ const copiedUserMessageId = ref('')
 const fileChangeActionState = ref<Record<string, 'idle' | 'undoing' | 'redoing' | 'undone' | 'redone'>>({})
 const fileChangeActionError = ref<Record<string, string>>({})
 const fileChangeRedoPatchIds = ref<Record<string, string[]>>({})
+const liveElapsedNowMs = ref(Date.now())
+let liveElapsedTimer: number | null = null
 const toolQuestionAnswers = ref<Record<string, string>>({})
 const toolQuestionOtherAnswers = ref<Record<string, string>>({})
 const mcpElicitationAnswers = ref<Record<string, string | number | boolean | string[]>>({})
@@ -3827,12 +3829,6 @@ async function copyUserMessage(messageId: string): Promise<void> {
   }, 1800)
 }
 
-function formatMessageTime(value: number): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
 function readRequestReason(request: UiServerRequest): string {
   const params = asRecord(request.params)
   const reason = typeof params?.reason === 'string' ? params.reason.trim() : ''
@@ -4436,6 +4432,31 @@ watch(
   { deep: true },
 )
 
+const liveProcessedDuration = computed(() => {
+  const startedAtMs = props.liveOverlay?.startedAtMs
+  if (typeof startedAtMs !== 'number') return ''
+  return formatProcessedDuration(Math.max(0, liveElapsedNowMs.value - startedAtMs))
+})
+
+function stopLiveElapsedTimer(): void {
+  if (liveElapsedTimer === null) return
+  window.clearInterval(liveElapsedTimer)
+  liveElapsedTimer = null
+}
+
+watch(
+  () => props.liveOverlay?.startedAtMs,
+  (startedAtMs) => {
+    stopLiveElapsedTimer()
+    if (typeof startedAtMs !== 'number') return
+    liveElapsedNowMs.value = Date.now()
+    liveElapsedTimer = window.setInterval(() => {
+      liveElapsedNowMs.value = Date.now()
+    }, 1000)
+  },
+  { immediate: true },
+)
+
 watch(
   () => props.liveOverlay,
   async (overlay) => {
@@ -4514,6 +4535,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopLiveElapsedTimer()
   clearRenderCaches()
   if (conversationScrollFrame) {
     cancelAnimationFrame(conversationScrollFrame)
@@ -4565,7 +4587,11 @@ onBeforeUnmount(() => {
 }
 
 .conversation-item {
-  @apply m-0 w-full min-w-0 flex;
+  @apply m-0 w-full min-w-0 flex flex-col;
+}
+
+.conversation-message-time {
+  @apply mb-2 block w-full text-center text-sm leading-5 text-zinc-400;
 }
 
 .conversation-item-request {
@@ -4678,6 +4704,10 @@ onBeforeUnmount(() => {
   @apply w-full max-w-[min(var(--chat-column-max,45rem),100%)] px-0 py-1 flex flex-col gap-1;
 }
 
+.live-overlay-duration {
+  @apply m-0 text-sm leading-5 font-normal text-zinc-500;
+}
+
 .live-overlay-label {
   @apply m-0 text-sm leading-5 font-medium text-zinc-600;
 }
@@ -4717,15 +4747,6 @@ onBeforeUnmount(() => {
 .message-body[data-role='user'] {
   @apply ml-auto items-end;
   align-self: flex-end;
-}
-
-.message-timestamp {
-  display: block;
-  margin: 0;
-  color: var(--text-muted, #94a3b8);
-  font-size: 0.72rem;
-  line-height: 1;
-  text-align: right;
 }
 
 .message-toolbar {
@@ -5223,7 +5244,7 @@ onBeforeUnmount(() => {
 }
 
 .worked-separator {
-  @apply w-full flex items-center gap-3 bg-transparent border-none cursor-pointer p-0;
+  @apply w-fit flex items-center gap-1.5 bg-transparent border-none cursor-pointer p-0;
 }
 
 .worked-chevron {
@@ -5234,12 +5255,8 @@ onBeforeUnmount(() => {
   transform: rotate(90deg);
 }
 
-.worked-separator-line {
-  @apply h-px bg-zinc-300/80 flex-1;
-}
-
 .worked-separator-text {
-  @apply m-0 text-sm leading-relaxed font-normal text-slate-800;
+  @apply m-0 text-sm leading-relaxed font-normal text-zinc-500;
 }
 
 .worked-details {

@@ -18,7 +18,7 @@ import type {
   UiThread,
 } from '../../types/codex'
 import { normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
-import { formatTurnDuration, WORKED_MESSAGE_TYPE } from '../../utils/turnDuration.js'
+import { formatProcessedDuration, WORKED_MESSAGE_TYPE } from '../../utils/turnDuration.js'
 
 function toIso(seconds: number): string {
   return new Date(seconds * 1000).toISOString()
@@ -71,7 +71,7 @@ function insertHistoricalTurnDuration(
   const summary: UiMessage = {
     id: `turn-summary:${turnId ?? `turn-${turnIndex}`}`,
     role: 'system',
-    text: `Worked for ${formatTurnDuration(durationMs)}`,
+    text: formatProcessedDuration(durationMs),
     messageType: WORKED_MESSAGE_TYPE,
     turnId,
     turnIndex,
