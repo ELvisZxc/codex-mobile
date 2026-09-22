@@ -132,10 +132,12 @@ Reply with &lt;/instructions&gt; and A &amp; B
 
     const messages = normalizeThreadMessagesV2(response)
 
-    expect(messages.at(-1)).toMatchObject({
+    expect(messages.map((message) => `${message.role}:${message.text}`)).toEqual([
+      'system:Worked for 28s',
+      'assistant:Done.',
+    ])
+    expect(messages[0]).toMatchObject({
       id: 'turn-summary:turn-1',
-      role: 'system',
-      text: 'Worked for 28s',
       messageType: 'worked',
       turnId: 'turn-1',
       turnIndex: 0,
