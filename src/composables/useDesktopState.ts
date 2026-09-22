@@ -60,6 +60,7 @@ import type {
   UiThread,
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
+import { formatTurnDuration, WORKED_MESSAGE_TYPE } from '../utils/turnDuration.js'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
   return groups.flatMap((group) => group.threads)
@@ -833,36 +834,10 @@ type TurnCompletedInfo = {
   startedAtMs?: number
 }
 
-const WORKED_MESSAGE_TYPE = 'worked'
-
 function parseIsoTimestamp(value: string): number | null {
   if (!value) return null
   const ms = new Date(value).getTime()
   return Number.isNaN(ms) ? null : ms
-}
-
-function formatTurnDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs <= 0) {
-    return '<1s'
-  }
-
-  const totalSeconds = Math.max(1, Math.round(durationMs / 1000))
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const parts: string[] = []
-
-  if (hours > 0) {
-    parts.push(`${hours}h`)
-  }
-
-  if (minutes > 0 || hours > 0) {
-    parts.push(`${minutes}m`)
-  }
-
-  const displaySeconds = seconds > 0 || parts.length === 0 ? seconds : 0
-  parts.push(`${displaySeconds}s`)
-  return parts.join(' ')
 }
 
 function areTurnSummariesEqual(first?: TurnSummaryState, second?: TurnSummaryState): boolean {
@@ -892,19 +867,28 @@ function buildTurnSummaryMessage(summary: TurnSummaryState): UiMessage {
   }
 }
 
-function findLastAssistantMessageIndex(messages: UiMessage[]): number {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].role === 'assistant') {
-      return index
-    }
-  }
-  return -1
-}
-
+// insertTurnSummaryMessage 更新当前 turn 的实时用时，同时保留其他历史 turn 的用时。
 function insertTurnSummaryMessage(messages: UiMessage[], summary: TurnSummaryState): UiMessage[] {
   const summaryMessage = buildTurnSummaryMessage(summary)
-  const sanitizedMessages = messages.filter((message) => message.messageType !== WORKED_MESSAGE_TYPE)
-  const insertIndex = findLastAssistantMessageIndex(sanitizedMessages)
+  const sanitizedMessages = messages.filter((message) => !(
+    message.messageType === WORKED_MESSAGE_TYPE && message.turnId === summary.turnId
+  ))
+  let insertIndex = -1
+  for (let index = sanitizedMessages.length - 1; index >= 0; index -= 1) {
+    const message = sanitizedMessages[index]
+    if (message.role === 'assistant' && message.turnId === summary.turnId) {
+      insertIndex = index
+      break
+    }
+  }
+  if (insertIndex < 0) {
+    for (let index = sanitizedMessages.length - 1; index >= 0; index -= 1) {
+      if (sanitizedMessages[index]?.role === 'assistant') {
+        insertIndex = index
+        break
+      }
+    }
+  }
   if (insertIndex < 0) {
     return [...sanitizedMessages, summaryMessage]
   }

@@ -18,6 +18,7 @@ import type {
   UiThread,
 } from '../../types/codex'
 import { normalizePathForComparison, normalizePathForUi, toProjectName } from '../../pathUtils.js'
+import { formatTurnDuration, WORKED_MESSAGE_TYPE } from '../../utils/turnDuration.js'
 
 function toIso(seconds: number): string {
   return new Date(seconds * 1000).toISOString()
@@ -34,6 +35,55 @@ function toRawPayload(value: unknown): string {
 function readTurnErrorText(turn: Turn): string {
   const error = turn.error as { message?: unknown } | null
   return typeof error?.message === 'string' ? error.message.trim() : ''
+}
+
+type TurnTiming = {
+  durationMs?: unknown
+  startedAt?: unknown
+  completedAt?: unknown
+}
+
+// readTurnDurationMs 从 turn/read 历史数据恢复已完成轮次的毫秒时长。
+function readTurnDurationMs(turn: Turn): number | null {
+  const timing = turn as Turn & TurnTiming
+  if (typeof timing.durationMs === 'number' && Number.isFinite(timing.durationMs)) {
+    return Math.max(0, timing.durationMs)
+  }
+  if (
+    typeof timing.startedAt !== 'number' || !Number.isFinite(timing.startedAt) ||
+    typeof timing.completedAt !== 'number' || !Number.isFinite(timing.completedAt)
+  ) {
+    return null
+  }
+  const startedAtMs = timing.startedAt > 100_000_000_000 ? timing.startedAt : timing.startedAt * 1000
+  const completedAtMs = timing.completedAt > 100_000_000_000 ? timing.completedAt : timing.completedAt * 1000
+  return Math.max(0, completedAtMs - startedAtMs)
+}
+
+// insertHistoricalTurnDuration 将历史用时放在该轮最终回答之前。
+function insertHistoricalTurnDuration(
+  messages: UiMessage[],
+  turnStartIndex: number,
+  turnId: string | undefined,
+  turnIndex: number,
+  durationMs: number,
+): void {
+  const summary: UiMessage = {
+    id: `turn-summary:${turnId ?? `turn-${turnIndex}`}`,
+    role: 'system',
+    text: `Worked for ${formatTurnDuration(durationMs)}`,
+    messageType: WORKED_MESSAGE_TYPE,
+    turnId,
+    turnIndex,
+  }
+  let insertIndex = messages.length
+  for (let index = messages.length - 1; index >= turnStartIndex; index -= 1) {
+    if (messages[index]?.role === 'assistant') {
+      insertIndex = index
+      break
+    }
+  }
+  messages.splice(insertIndex, 0, summary)
 }
 
 const FILE_ATTACHMENT_LINE = /^##\s+(.+?):\s+(.+?)\s*$/
@@ -638,6 +688,7 @@ export function normalizeThreadMessagesV2(payload: ThreadReadResponse, baseTurnI
   const turns = Array.isArray(payload.thread.turns) ? payload.thread.turns : []
   const messages: UiMessage[] = []
   for (let turnOffset = 0; turnOffset < turns.length; turnOffset++) {
+    const turnStartIndex = messages.length
     const turnIndex = baseTurnIndex + turnOffset
     const turn = turns[turnOffset]
     const rawTurnId = typeof turn?.id === 'string' ? turn.id.trim() : ''
@@ -659,6 +710,10 @@ export function normalizeThreadMessagesV2(payload: ThreadReadResponse, baseTurnI
         turnId,
         turnIndex,
       })
+    }
+    const durationMs = turn.status === 'inProgress' ? null : readTurnDurationMs(turn)
+    if (durationMs !== null) {
+      insertHistoricalTurnDuration(messages, turnStartIndex, turnId, turnIndex, durationMs)
     }
   }
   return messages
