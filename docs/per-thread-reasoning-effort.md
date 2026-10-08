@@ -10,7 +10,7 @@ Remember a manually selected `model_reasoning_effort` independently for each Cod
 - Returning to a thread restores its saved selection, including after a page refresh.
 - A thread without a manual selection uses the current app-server `config/read` value as its fallback.
 - A manual thread selection takes precedence over later global config refreshes.
-- The new-thread composer uses a separate `__new_thread__` context until a real thread ID exists.
+- The new-thread composer uses a separate `__new-thread__` context until a real thread ID exists.
 - Invalid or malformed saved values are ignored and fall back to the global config.
 - Persistence is browser-local; server-side synchronization across devices is out of scope.
 
@@ -27,7 +27,7 @@ Example:
 ```json
 {
   "thread-id": "high",
-  "__new_thread__": "medium"
+  "__new-thread__": "medium"
 }
 ```
 
@@ -54,7 +54,7 @@ thread-specific saved value
 | RE-001 | Manual effort is isolated per thread | `useDesktopState.test.ts` | Thread A and B retain different selections after switching |
 | RE-002 | Saved effort survives page recreation | `useDesktopState.test.ts` | A recreated state restores the thread value |
 | RE-003 | Saved effort wins over global refresh | `useDesktopState.test.ts` | Later `config/read` changes do not overwrite a manual value |
-| RE-004 | New-thread preference is used as fallback | `useDesktopState.test.ts` | A thread without a specific value inherits `__new_thread__` |
+| RE-004 | New-thread preference is used as fallback | `useDesktopState.test.ts` | A thread without a specific value inherits `__new-thread__` |
 | RE-005 | Invalid saved values are safe | `useDesktopState.test.ts` | Invalid values fall back to global config |
 
 ## Review status

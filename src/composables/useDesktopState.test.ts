@@ -1390,7 +1390,7 @@ describe('per-thread reasoning effort preference', () => {
   it('uses the new-thread preference when no thread-specific value exists', async () => {
     installTestWindow({
       'codex-web-local.selected-reasoning-effort-by-context.v1': JSON.stringify({
-        __new_thread__: 'high',
+        '__new-thread__': 'high',
       }),
     })
     setupModelPreferenceMocks()
