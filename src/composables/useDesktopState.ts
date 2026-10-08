@@ -855,25 +855,48 @@ function hasOptimisticUserMessages(messages: UiMessage[]): boolean {
   return messages.some(isOptimisticUserMessage)
 }
 
+// extractLocalImagePathFromUrl 提取图片代理 URL 对应的真实文件路径。
+function extractLocalImagePathFromUrl(value: string): string {
+  try {
+    const parsed = new URL(value, 'http://localhost')
+    if (parsed.pathname !== '/codex-local-image') return ''
+    return parsed.searchParams.get('path')?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+// readNonImageAttachmentPaths 排除已作为图片展示的同路径文件，再按真实路径对账。
+function readNonImageAttachmentPaths(message: UiMessage): string[] {
+  const imagePaths = new Set(
+    (message.images ?? []).map(extractLocalImagePathFromUrl).filter((path) => path.length > 0),
+  )
+  return [...new Set(
+    (message.fileAttachments ?? [])
+      .map((attachment) => attachment.path.trim())
+      .filter((path) => !imagePaths.has(path)),
+  )].sort()
+}
+
+// hasEquivalentUserMessage 判断正式回显是否可替代本地预显示，避免附件双重表示导致重复。
 function hasEquivalentUserMessage(target: UiMessage, messages: UiMessage[]): boolean {
   if (target.role !== 'user') return false
   const targetText = normalizeMessageText(target.text)
   const targetImages = Array.isArray(target.images) ? target.images : []
-  const targetFileCount = Array.isArray(target.fileAttachments) ? target.fileAttachments.length : 0
+  const targetFiles = readNonImageAttachmentPaths(target)
   const targetSkillCount = Array.isArray(target.skills) ? target.skills.length : 0
 
   return messages.some((message) => {
     if (message === target || message.role !== 'user' || isOptimisticUserMessage(message)) return false
     const messageText = normalizeMessageText(message.text)
     const messageImages = Array.isArray(message.images) ? message.images : []
-    const messageFileCount = Array.isArray(message.fileAttachments) ? message.fileAttachments.length : 0
     const messageSkillCount = Array.isArray(message.skills) ? message.skills.length : 0
-    return (
-      messageText === targetText &&
-      areStringArraysEqual(messageImages, targetImages) &&
-      messageFileCount === targetFileCount &&
-      messageSkillCount === targetSkillCount
-    )
+    if (
+      messageText !== targetText ||
+      !areStringArraysEqual(messageImages, targetImages) ||
+      messageSkillCount !== targetSkillCount
+    ) return false
+    return areStringArraysEqual(readNonImageAttachmentPaths(message), targetFiles)
   })
 }
 
@@ -1587,16 +1610,6 @@ export function useDesktopState() {
   const error = ref('')
   const isPolling = ref(false)
   const hasLoadedThreads = ref(false)
-
-  function extractLocalImagePathFromUrl(value: string): string {
-    try {
-      const parsed = new URL(value, 'http://localhost')
-      if (parsed.pathname !== '/codex-local-image') return ''
-      return parsed.searchParams.get('path')?.trim() ?? ''
-    } catch {
-      return ''
-    }
-  }
 
   function shouldReuseAttachedImageFromPrompt(promptText: string): boolean {
     const normalized = promptText.trim().toLowerCase()
