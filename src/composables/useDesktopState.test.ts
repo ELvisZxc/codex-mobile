@@ -10,6 +10,8 @@ import {
 } from './useDesktopState'
 import type { UiProjectGroup } from '../types/codex'
 import type { WorkspaceRootsState } from '../api/codexGateway'
+import { normalizeThreadMessagesV2 } from '../api/normalizers/v2'
+import type { ThreadReadResponse } from '../api/appServerDtos'
 
 const gatewayMocks = vi.hoisted(() => ({
   archiveThread: vi.fn(),
@@ -1602,5 +1604,113 @@ describe('realtime reconnect recovery', () => {
     expect(gatewayMocks.getThreadGroupsPage).toHaveBeenCalledTimes(2)
     expect(gatewayMocks.getThreadDetail).toHaveBeenCalledTimes(2)
     expect(state.messages.value.map((message) => message.text)).toEqual(['hi', 'done'])
+  })
+})
+
+describe('image user message reconciliation', () => {
+  const imagePath = '/tmp/codex-web-uploads/test/screenshot.png'
+  const secondImagePath = '/tmp/codex-web-uploads/test/second.png'
+  const documentPath = '/tmp/codex-web-uploads/test/report.txt'
+  const otherDocumentPath = '/tmp/codex-web-uploads/test/other.txt'
+  const toImageUrl = (path: string) => `/codex-local-image?path=${encodeURIComponent(path)}`
+  const toFile = (path: string) => ({ label: path.split('/').at(-1)!, path, fsPath: path })
+
+  // 使用真实 normalizer 生成回显消息，覆盖图片被同时转换为文件附件的协议路径。
+  function echoMessages(imagePaths: string[], filePaths: string[], status: 'inProgress' | 'failed') {
+    const text = filePaths.length > 0
+      ? `# Files mentioned by the user:\n\n${filePaths.map((path) => `## ${path.split('/').at(-1)}: ${path}`).join('\n')}\n\n## My request for Codex:\n\nAnalyze this image`
+      : 'Analyze this image'
+    const response: ThreadReadResponse = {
+      thread: {
+        id: 'thread-image-echo', preview: 'Analyze this image', modelProvider: 'openai',
+        createdAt: 1, updatedAt: 2, path: null, cwd: '/tmp/project', cliVersion: 'test',
+        source: 'appServer', gitInfo: null,
+        turns: [{
+          id: 'turn-image-echo', status, error: null,
+          items: [{
+            type: 'userMessage', id: 'persisted-image-message',
+            content: [
+              { type: 'text', text, text_elements: [] },
+              ...imagePaths.map((path) => ({ type: 'localImage' as const, path })),
+            ],
+          }],
+        }],
+      },
+    }
+    return normalizeThreadMessagesV2(response)
+  }
+
+  it.each([
+    { name: 'single image with a generated file descriptor', imagePaths: [imagePath], files: [], echoedFiles: [imagePath], expectedRows: 1 },
+    { name: 'multiple images with generated file descriptors', imagePaths: [imagePath, secondImagePath], files: [], echoedFiles: [imagePath, secondImagePath], expectedRows: 1 },
+    { name: 'image plus an explicit document', imagePaths: [imagePath], files: [documentPath], echoedFiles: [imagePath, documentPath], expectedRows: 1 },
+    { name: 'explicit image file also present in the image list', imagePaths: [imagePath], files: [imagePath], echoedFiles: [imagePath], expectedRows: 1 },
+    { name: 'different document paths with equal attachment counts', imagePaths: [imagePath], files: [documentPath], echoedFiles: [otherDocumentPath], expectedRows: 2 },
+    { name: 'an additional unrelated document', imagePaths: [imagePath], files: [], echoedFiles: [imagePath, documentPath], expectedRows: 2 },
+    { name: 'documents without images', imagePaths: [], files: [documentPath], echoedFiles: [documentPath], expectedRows: 1 },
+    { name: 'different documents without images', imagePaths: [], files: [documentPath], echoedFiles: [otherDocumentPath], expectedRows: 2 },
+    { name: 'document order differs in the echo', imagePaths: [imagePath], files: [documentPath, otherDocumentPath], echoedFiles: [otherDocumentPath, imagePath, documentPath], expectedRows: 1 },
+    { name: 'plain text without attachments', imagePaths: [], files: [], echoedFiles: [], expectedRows: 1 },
+  ])('reconciles $name without discarding distinct content', async ({ imagePaths, files, echoedFiles, expectedRows }) => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    const emptyDetail = { messages: [], inProgress: false, activeTurnId: '', hasMoreOlder: false, turnIndexByTurnId: {} }
+    gatewayMocks.resumeThread.mockResolvedValue(emptyDetail)
+    gatewayMocks.getThreadDetail.mockResolvedValue(emptyDetail)
+    gatewayMocks.startThreadTurn.mockResolvedValue('turn-image-echo')
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-image-echo')
+    await state.loadMessages('thread-image-echo')
+    await state.sendMessageToSelectedThread('Analyze this image', imagePaths.map(toImageUrl), [], 'steer', files.map(toFile))
+    expect(gatewayMocks.startThreadTurn).toHaveBeenCalledTimes(1)
+    expect(state.messages.value.filter((message) => message.role === 'user')).toHaveLength(1)
+
+    const echoed = echoMessages(imagePaths, echoedFiles, 'inProgress')
+    expect(echoed[0]?.text).toBe('Analyze this image')
+    expect(echoed[0]?.fileAttachments?.length ?? 0).toBe(echoedFiles.length)
+    gatewayMocks.getThreadDetail.mockResolvedValue({ ...emptyDetail, messages: echoed, inProgress: true, activeTurnId: 'turn-image-echo' })
+    await state.loadMessages('thread-image-echo', { silent: true, force: true })
+    const users = state.messages.value.filter((message) => message.role === 'user')
+    expect(users).toHaveLength(expectedRows)
+    expect(users.some((message) => message.id === 'persisted-image-message')).toBe(true)
+    if (expectedRows === 1) {
+      expect(users.some((message) => message.messageType === 'userMessage.optimistic')).toBe(false)
+    } else {
+      expect(users.some((message) => message.messageType === 'userMessage.optimistic')).toBe(true)
+    }
+    expect(gatewayMocks.startThreadTurn).toHaveBeenCalledTimes(1)
+  })
+
+  it('reconciles the image echo after a capacity failure without another send', async () => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    const emptyDetail = { messages: [], inProgress: false, activeTurnId: '', hasMoreOlder: false, turnIndexByTurnId: {} }
+    gatewayMocks.resumeThread.mockResolvedValue(emptyDetail)
+    gatewayMocks.getThreadDetail.mockResolvedValue(emptyDetail)
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-image-echo')
+    await state.loadMessages('thread-image-echo')
+    gatewayMocks.startThreadTurn.mockRejectedValueOnce(new Error('Selected model is at capacity. Please try a different model.'))
+    await expect(state.sendMessageToSelectedThread('Analyze this image', [toImageUrl(imagePath)])).rejects.toThrow('at capacity')
+    gatewayMocks.getThreadDetail.mockResolvedValue({ ...emptyDetail, messages: echoMessages([imagePath], [imagePath], 'failed') })
+    await state.loadMessages('thread-image-echo', { force: true })
+    expect(state.messages.value.filter((message) => message.role === 'user')).toHaveLength(1)
+    expect(gatewayMocks.startThreadTurn).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the optimistic image while the server has not echoed the user item', async () => {
+    installTestWindow()
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    const emptyDetail = { messages: [], inProgress: false, activeTurnId: '', hasMoreOlder: false, turnIndexByTurnId: {} }
+    gatewayMocks.resumeThread.mockResolvedValue(emptyDetail)
+    gatewayMocks.getThreadDetail.mockResolvedValue(emptyDetail)
+    gatewayMocks.startThreadTurn.mockResolvedValue('turn-image-echo')
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-image-echo')
+    await state.loadMessages('thread-image-echo')
+    await state.sendMessageToSelectedThread('Analyze this image', [toImageUrl(imagePath)])
+    await state.loadMessages('thread-image-echo', { silent: true, force: true })
+    expect(state.messages.value.filter((message) => message.role === 'user')).toHaveLength(1)
+    expect(state.messages.value[0]?.messageType).toBe('userMessage.optimistic')
   })
 })
