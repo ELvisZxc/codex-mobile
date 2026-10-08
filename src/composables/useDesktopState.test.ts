@@ -698,6 +698,100 @@ describe('live error overlay', () => {
     expect(state.messages.value.at(-1)?.text).toBe('已处理 1分钟 2秒')
   })
 
+  it('restores the original live turn start time after the page state is recreated', async () => {
+    installTestWindow()
+    let notificationHandler: (notification: { method: string; params?: unknown; atIso?: string }) => void = () => {}
+    gatewayMocks.subscribeCodexNotifications.mockImplementation((handler) => {
+      notificationHandler = handler
+      return vi.fn()
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValueOnce({
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+
+    const beforeRefresh = useDesktopState()
+    beforeRefresh.primeSelectedThread('thread-live-duration-refresh')
+    await beforeRefresh.loadMessages('thread-live-duration-refresh')
+    beforeRefresh.startPolling()
+
+    const startedAtIso = '2026-09-23T02:00:00.000Z'
+    notificationHandler({
+      method: 'turn/started',
+      atIso: startedAtIso,
+      params: {
+        threadId: 'thread-live-duration-refresh',
+        turn: { id: 'turn-live-refresh', status: 'inProgress' },
+      },
+    })
+
+    const afterRefresh = useDesktopState()
+    gatewayMocks.getThreadDetail.mockResolvedValueOnce({
+      messages: [],
+      inProgress: true,
+      activeTurnId: 'turn-live-refresh',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+    afterRefresh.primeSelectedThread('thread-live-duration-refresh')
+    await afterRefresh.loadMessages('thread-live-duration-refresh')
+
+    expect(afterRefresh.selectedLiveOverlay.value?.startedAtMs).toBe(Date.parse(startedAtIso))
+
+    notificationHandler({
+      method: 'turn/completed',
+      atIso: '2026-09-23T02:01:00.000Z',
+      params: {
+        threadId: 'thread-live-duration-refresh',
+        durationMs: 60_000,
+        turn: { id: 'turn-live-refresh', status: 'completed' },
+      },
+    })
+    const persistedStarts = JSON.parse(
+      window.localStorage.getItem('codex-web-local.thread-turn-started-at.v1') ?? '{}',
+    ) as Record<string, unknown>
+    expect(persistedStarts).not.toHaveProperty('thread-live-duration-refresh')
+  })
+
+  it('does not reuse a persisted start time from a previous turn in the same thread', async () => {
+    const oldStartedAtMs = Date.parse('2026-09-23T01:00:00.000Z')
+    installTestWindow({
+      'codex-web-local.thread-turn-started-at.v1': JSON.stringify({
+        'thread-live-duration-next': {
+          startedAtMs: oldStartedAtMs,
+          turnId: 'turn-previous',
+        },
+      }),
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    const messageStartedAtMs = Date.parse('2026-09-23T02:00:00.000Z')
+    gatewayMocks.getThreadDetail.mockResolvedValueOnce({
+      messages: [{
+        id: 'user-next',
+        role: 'user',
+        text: 'next turn',
+        messageType: 'userMessage',
+        createdAtMs: messageStartedAtMs,
+      }],
+      inProgress: true,
+      activeTurnId: 'turn-current',
+      turnIndexByTurnId: {},
+      hasMoreOlder: false,
+    })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-live-duration-next')
+    await state.loadMessages('thread-live-duration-next')
+
+    expect(state.selectedLiveOverlay.value?.startedAtMs).toBe(messageStartedAtMs)
+  })
+
   it('keeps a new live error visible when an older persisted turn error exists', async () => {
     installTestWindow()
     let notificationHandler: (notification: { method: string; params?: unknown }) => void = () => {}

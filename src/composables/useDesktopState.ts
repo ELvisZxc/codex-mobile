@@ -76,6 +76,7 @@ const READ_STATE_STORAGE_KEY = 'codex-web-local.thread-read-state.v1'
 const UNREAD_CUTOFF_STORAGE_KEY = 'codex-web-local.thread-unread-cutoff.v1'
 const THREAD_TOKEN_USAGE_STORAGE_KEY = 'codex-web-local.thread-token-usage.v1'
 const THREAD_TERMINAL_OPEN_STORAGE_KEY = 'codex-web-local.thread-terminal-open.v1'
+const THREAD_TURN_STARTED_AT_STORAGE_KEY = 'codex-web-local.thread-turn-started-at.v1'
 const SELECTED_THREAD_STORAGE_KEY = 'codex-web-local.selected-thread-id.v1'
 const SELECTED_MODEL_BY_CONTEXT_STORAGE_KEY = 'codex-web-local.selected-model-by-context.v1'
 const SELECTED_REASONING_EFFORT_BY_CONTEXT_STORAGE_KEY = 'codex-web-local.selected-reasoning-effort-by-context.v1'
@@ -99,6 +100,11 @@ const MODEL_FALLBACK_ID = 'gpt-5.4-mini'
 const OPENCODE_ZEN_DEFAULT_MODEL = 'big-pickle'
 const CODEX_CLI_MISSING_MESSAGE = 'Codex CLI not found. Install @openai/codex or set CODEXUI_CODEX_COMMAND.'
 type SelectThreadResult = 'ok' | 'not-found' | 'error'
+
+type TurnStartedAtState = {
+  startedAtMs: number
+  turnId?: string
+}
 
 function isCodexCliMissingError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '')
@@ -129,6 +135,52 @@ function loadReadStateMap(): Record<string, string> {
 function saveReadStateMap(state: Record<string, string>): void {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(READ_STATE_STORAGE_KEY, JSON.stringify(state))
+}
+
+// loadTurnStartedAtMap 在页面重建后恢复仍活动的线程计时起点。
+function loadTurnStartedAtMap(): Record<string, TurnStartedAtState> {
+  if (typeof window === 'undefined') return {}
+
+  try {
+    const raw = window.localStorage.getItem(THREAD_TURN_STARTED_AT_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+    const state: Record<string, TurnStartedAtState> = {}
+    for (const [threadId, value] of Object.entries(parsed)) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        state[threadId] = { startedAtMs: value }
+        continue
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const entry = value as { startedAtMs?: unknown; turnId?: unknown }
+      if (typeof entry.startedAtMs !== 'number' || !Number.isFinite(entry.startedAtMs)) continue
+      state[threadId] = {
+        startedAtMs: entry.startedAtMs,
+        ...(typeof entry.turnId === 'string' && entry.turnId ? { turnId: entry.turnId } : {}),
+      }
+    }
+    return state
+  } catch {
+    return {}
+  }
+}
+
+// saveTurnStartedAtForThread 更新单个线程的持久化起点，避免覆盖其他标签页的线程状态。
+function saveTurnStartedAtForThread(threadId: string, state: TurnStartedAtState | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    const persisted = loadTurnStartedAtMap()
+    if (state) {
+      persisted[threadId] = state
+    } else {
+      delete persisted[threadId]
+    }
+    window.localStorage.setItem(THREAD_TURN_STARTED_AT_STORAGE_KEY, JSON.stringify(persisted))
+  } catch {
+    // 浏览器本地存储不可用时，继续使用内存中的计时状态。
+  }
 }
 
 function loadUnreadCutoffIso(): string {
@@ -1438,6 +1490,7 @@ export function filterGroupsByWorkspaceRoots(
   return orderGroupsByWorkspaceProjectOrder(filteredGroups, rootsState, duplicateLeafNames)
 }
 
+// useDesktopState 管理对话、线程状态及可跨页面刷新的活动计时信息。
 export function useDesktopState() {
   const projectGroups = ref<UiProjectGroup[]>([])
   const sourceGroups = ref<UiProjectGroup[]>([])
@@ -1507,7 +1560,7 @@ export function useDesktopState() {
   const turnActivityByThreadId = ref<Record<string, TurnActivityState>>({})
   const turnErrorByThreadId = ref<Record<string, TurnErrorState>>({})
   const activeTurnIdByThreadId = ref<Record<string, string>>({})
-  const turnStartedAtByThreadId = ref<Record<string, number>>({})
+  const turnStartedAtByThreadId = ref<Record<string, TurnStartedAtState>>(loadTurnStartedAtMap())
   const interruptBlockedUntilPersistedByThreadId = ref<Record<string, boolean>>({})
   const threadListedByServerById = ref<Record<string, boolean>>({})
   const persistedUserMessageByThreadId = ref<Record<string, boolean>>({})
@@ -1645,7 +1698,7 @@ export function useDesktopState() {
 
     if (!isInProgress && !activity && !reasoningText && !errorText) return null
     return {
-      startedAtMs: isInProgress ? turnStartedAtByThreadId.value[threadId] : undefined,
+      startedAtMs: isInProgress ? turnStartedAtByThreadId.value[threadId]?.startedAtMs : undefined,
       activityLabel: activity?.label || 'Thinking',
       activityDetails: activity?.details ?? [],
       reasoningText,
@@ -2399,17 +2452,23 @@ export function useDesktopState() {
     }
   }
 
-  function setTurnStartedAtForThread(threadId: string, startedAtMs: number | null): void {
+  // setTurnStartedAtForThread 更新线程的计时起点，并同步持久化状态。
+  function setTurnStartedAtForThread(threadId: string, startedAtMs: number | null, turnId?: string): void {
     if (!threadId) return
     if (typeof startedAtMs === 'number' && Number.isFinite(startedAtMs)) {
       turnStartedAtByThreadId.value = {
         ...turnStartedAtByThreadId.value,
-        [threadId]: startedAtMs,
+        [threadId]: {
+          startedAtMs,
+          ...(typeof turnId === 'string' && turnId ? { turnId } : {}),
+        },
       }
+      saveTurnStartedAtForThread(threadId, turnStartedAtByThreadId.value[threadId] ?? null)
       return
     }
     if (turnStartedAtByThreadId.value[threadId] !== undefined) {
       turnStartedAtByThreadId.value = omitKey(turnStartedAtByThreadId.value, threadId)
+      saveTurnStartedAtForThread(threadId, null)
     }
   }
 
@@ -3875,7 +3934,7 @@ export function useDesktopState() {
     const startedTurn = readTurnStartedInfo(notification)
     if (startedTurn) {
       pendingTurnStartsById.set(startedTurn.turnId, startedTurn)
-      setTurnStartedAtForThread(startedTurn.threadId, startedTurn.startedAtMs)
+      setTurnStartedAtForThread(startedTurn.threadId, startedTurn.startedAtMs, startedTurn.turnId)
       setTurnIndexForThread(startedTurn.threadId, startedTurn.turnId, inferNextTurnIndex(startedTurn.threadId))
       activeTurnIdByThreadId.value = {
         ...activeTurnIdByThreadId.value,
@@ -4557,6 +4616,18 @@ export function useDesktopState() {
           [threadId]: version,
         }
       }
+      if (!inProgress) {
+        setTurnStartedAtForThread(threadId, null)
+      } else {
+        const activeStartedAt = turnStartedAtByThreadId.value[threadId]
+        const activeTurnChanged =
+          Boolean(activeTurnId) &&
+          Boolean(activeStartedAt?.turnId) &&
+          activeStartedAt?.turnId !== activeTurnId
+        if (activeTurnChanged) {
+          setTurnStartedAtForThread(threadId, null)
+        }
+      }
       if (inProgress && turnStartedAtByThreadId.value[threadId] === undefined) {
         let restoredStartedAtMs: number | null = null
         for (let index = mergedMessages.length - 1; index >= 0; index -= 1) {
@@ -4565,7 +4636,7 @@ export function useDesktopState() {
           restoredStartedAtMs = message.createdAtMs
           break
         }
-        setTurnStartedAtForThread(threadId, restoredStartedAtMs ?? Date.now())
+        setTurnStartedAtForThread(threadId, restoredStartedAtMs ?? Date.now(), activeTurnId || undefined)
       }
       setThreadInProgress(threadId, inProgress)
       clearTransientTurnErrorForThread(threadId)
