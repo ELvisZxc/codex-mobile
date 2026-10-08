@@ -78,6 +78,7 @@ const THREAD_TOKEN_USAGE_STORAGE_KEY = 'codex-web-local.thread-token-usage.v1'
 const THREAD_TERMINAL_OPEN_STORAGE_KEY = 'codex-web-local.thread-terminal-open.v1'
 const SELECTED_THREAD_STORAGE_KEY = 'codex-web-local.selected-thread-id.v1'
 const SELECTED_MODEL_BY_CONTEXT_STORAGE_KEY = 'codex-web-local.selected-model-by-context.v1'
+const SELECTED_REASONING_EFFORT_BY_CONTEXT_STORAGE_KEY = 'codex-web-local.selected-reasoning-effort-by-context.v1'
 const LEGACY_SELECTED_MODEL_STORAGE_KEY = 'codex-web-local.selected-model-id.v1'
 const PROJECT_ORDER_STORAGE_KEY = 'codex-web-local.project-order.v1'
 const PROJECT_DISPLAY_NAME_STORAGE_KEY = 'codex-web-local.project-display-name.v1'
@@ -287,6 +288,70 @@ function saveSelectedModelMap(state: Record<string, string>): void {
     window.localStorage.removeItem(LEGACY_SELECTED_MODEL_STORAGE_KEY)
   } catch {
     // Keep in-memory selection working even if localStorage writes fail.
+  }
+}
+
+function normalizeStoredReasoningEffort(value: unknown): ReasoningEffort | '' {
+  return typeof value === 'string' && REASONING_EFFORT_OPTIONS.includes(value as ReasoningEffort)
+    ? value as ReasoningEffort
+    : ''
+}
+
+function loadSelectedReasoningEffortMap(): Record<string, ReasoningEffort> {
+  if (typeof window === 'undefined') return createStringKeyedRecord<ReasoningEffort>()
+
+  try {
+    const raw = window.localStorage.getItem(SELECTED_REASONING_EFFORT_BY_CONTEXT_STORAGE_KEY)
+    if (!raw) return createStringKeyedRecord<ReasoningEffort>()
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return createStringKeyedRecord<ReasoningEffort>()
+    }
+
+    const next = createStringKeyedRecord<ReasoningEffort>()
+    for (const [contextId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!contextId) continue
+      const effort = normalizeStoredReasoningEffort(value)
+      if (effort) next[contextId] = effort
+    }
+    return next
+  } catch {
+    return createStringKeyedRecord<ReasoningEffort>()
+  }
+}
+
+function readSelectedReasoningEffort(
+  state: Record<string, ReasoningEffort>,
+  threadId: string,
+): ReasoningEffort | '' {
+  const contextId = toThreadContextId(threadId)
+  return normalizeStoredReasoningEffort(state[contextId])
+    || normalizeStoredReasoningEffort(state[NEW_THREAD_COLLABORATION_MODE_CONTEXT])
+}
+
+function writeSelectedReasoningEffortForContext(
+  state: Record<string, ReasoningEffort>,
+  threadId: string,
+  effort: ReasoningEffort | '',
+): Record<string, ReasoningEffort> {
+  const contextId = toThreadContextId(threadId)
+  if (!effort) return omitStringKeyedRecordKey(state, contextId)
+
+  const next = cloneStringKeyedRecord(state)
+  next[contextId] = effort
+  return next
+}
+
+function saveSelectedReasoningEffortMap(state: Record<string, ReasoningEffort>): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (Object.keys(state).length === 0) {
+      window.localStorage.removeItem(SELECTED_REASONING_EFFORT_BY_CONTEXT_STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(SELECTED_REASONING_EFFORT_BY_CONTEXT_STORAGE_KEY, JSON.stringify(state))
+    }
+  } catch {
+    // Keep in-memory reasoning effort selection working when storage is unavailable.
   }
 }
 
@@ -1415,11 +1480,16 @@ export function useDesktopState() {
     loadSelectedCollaborationModeMap(),
   )
   const selectedModelIdByContext = ref<Record<string, string>>(loadSelectedModelMap())
+  const selectedReasoningEffortByContext = ref<Record<string, ReasoningEffort>>(
+    loadSelectedReasoningEffortMap(),
+  )
   const selectedCollaborationMode = ref<CollaborationModeKind>(
     readSelectedCollaborationMode(selectedCollaborationModeByContext.value, selectedThreadId.value),
   )
   const selectedModelId = ref(readSelectedModel(selectedModelIdByContext.value, selectedThreadId.value))
-  const selectedReasoningEffort = ref<ReasoningEffort | ''>('medium')
+  const selectedReasoningEffort = ref<ReasoningEffort | ''>(
+    readSelectedReasoningEffort(selectedReasoningEffortByContext.value, selectedThreadId.value) || 'medium',
+  )
   const selectedSpeedMode = ref<SpeedMode>('standard')
   const activeProviderId = ref('')
   const codexCliMissingError = ref('')
@@ -1671,6 +1741,8 @@ export function useDesktopState() {
       selectedCollaborationModeByContext.value,
       nextThreadId,
     )
+    selectedReasoningEffort.value =
+      readSelectedReasoningEffort(selectedReasoningEffortByContext.value, nextThreadId) || 'medium'
     activeReasoningItemId = ''
     shouldAutoScrollOnNextAgentEvent = false
   }
@@ -1917,6 +1989,12 @@ export function useDesktopState() {
       return
     }
     selectedReasoningEffort.value = effort
+    selectedReasoningEffortByContext.value = writeSelectedReasoningEffortForContext(
+      selectedReasoningEffortByContext.value,
+      selectedThreadId.value,
+      effort,
+    )
+    saveSelectedReasoningEffortMap(selectedReasoningEffortByContext.value)
   }
 
   async function updateSelectedSpeedMode(mode: SpeedMode): Promise<void> {
@@ -2030,7 +2108,13 @@ export function useDesktopState() {
         saveSelectedModelMap(selectedModelIdByContext.value)
       }
 
-      if (
+      const savedReasoningEffort = readSelectedReasoningEffort(
+        selectedReasoningEffortByContext.value,
+        selectedThreadId.value,
+      )
+      if (savedReasoningEffort) {
+        selectedReasoningEffort.value = savedReasoningEffort
+      } else if (
         currentConfig.reasoningEffort &&
         REASONING_EFFORT_OPTIONS.includes(currentConfig.reasoningEffort)
       ) {
@@ -2229,6 +2313,16 @@ export function useDesktopState() {
         selectedThreadId.value,
       )
       saveSelectedCollaborationModeMap(nextSelectedCollaborationModeMap)
+    }
+    const nextSelectedReasoningEffortMap = pruneThreadContextStateMap(
+      selectedReasoningEffortByContext.value,
+      activeThreadIds,
+    )
+    if (nextSelectedReasoningEffortMap !== selectedReasoningEffortByContext.value) {
+      selectedReasoningEffortByContext.value = nextSelectedReasoningEffortMap
+      selectedReasoningEffort.value =
+        readSelectedReasoningEffort(nextSelectedReasoningEffortMap, selectedThreadId.value) || 'medium'
+      saveSelectedReasoningEffortMap(nextSelectedReasoningEffortMap)
     }
     const nextReadState = pruneThreadStateMap(readStateByThreadId.value, activeThreadIds)
     if (nextReadState !== readStateByThreadId.value) {
