@@ -1297,6 +1297,127 @@ describe('findAdjacentThreadId', () => {
   })
 })
 
+describe('per-thread reasoning effort preference', () => {
+  function setupModelPreferenceMocks(): void {
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({
+      groups: [{
+        projectName: 'Project',
+        threads: [thread('thread-reasoning-a', '/tmp/project'), thread('thread-reasoning-b', '/tmp/project')],
+      }],
+      nextCursor: null,
+    })
+    gatewayMocks.getPendingServerRequests.mockResolvedValue([])
+    gatewayMocks.resumeThread.mockResolvedValue(null)
+    gatewayMocks.getThreadDetail.mockResolvedValue({
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.5',
+      providerId: '',
+      reasoningEffort: 'medium',
+      speedMode: 'standard',
+    })
+    gatewayMocks.getAvailableModelIds.mockResolvedValue(['gpt-5.5'])
+  }
+
+  it('remembers a manual effort independently for each thread', async () => {
+    installTestWindow()
+    setupModelPreferenceMocks()
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-reasoning-a')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+    state.setSelectedReasoningEffort('high')
+
+    expect(state.selectedReasoningEffort.value).toBe('high')
+    expect(JSON.parse(window.localStorage.getItem('codex-web-local.selected-reasoning-effort-by-context.v1') ?? '{}')).toEqual({
+      'thread-reasoning-a': 'high',
+    })
+
+    await state.selectThread('thread-reasoning-b')
+    expect(state.selectedReasoningEffort.value).toBe('medium')
+
+    state.setSelectedReasoningEffort('low')
+    await state.selectThread('thread-reasoning-a')
+    expect(state.selectedReasoningEffort.value).toBe('high')
+  })
+
+  it('restores a saved effort after page state is recreated', async () => {
+    installTestWindow({
+      'codex-web-local.selected-reasoning-effort-by-context.v1': JSON.stringify({
+        'thread-reasoning-a': 'high',
+      }),
+    })
+    setupModelPreferenceMocks()
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-reasoning-a')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.selectedReasoningEffort.value).toBe('high')
+  })
+
+  it('keeps a saved thread effort when the global config refreshes', async () => {
+    installTestWindow({
+      'codex-web-local.selected-reasoning-effort-by-context.v1': JSON.stringify({
+        'thread-reasoning-a': 'high',
+      }),
+    })
+    setupModelPreferenceMocks()
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-reasoning-a')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.5',
+      providerId: '',
+      reasoningEffort: 'low',
+      speedMode: 'standard',
+    })
+
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.selectedReasoningEffort.value).toBe('high')
+  })
+
+  it('uses the new-thread preference when no thread-specific value exists', async () => {
+    installTestWindow({
+      'codex-web-local.selected-reasoning-effort-by-context.v1': JSON.stringify({
+        __new_thread__: 'high',
+      }),
+    })
+    setupModelPreferenceMocks()
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-reasoning-a')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.selectedReasoningEffort.value).toBe('high')
+  })
+
+  it('ignores invalid saved values and falls back to the global config', async () => {
+    installTestWindow({
+      'codex-web-local.selected-reasoning-effort-by-context.v1': JSON.stringify({
+        'thread-reasoning-a': 'unsupported',
+      }),
+    })
+    setupModelPreferenceMocks()
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-reasoning-a')
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.selectedReasoningEffort.value).toBe('medium')
+  })
+})
+
 describe('realtime reconnect recovery', () => {
   it('reconciles an already-loaded selected thread when the notification stream reconnects', async () => {
     installTestWindow()

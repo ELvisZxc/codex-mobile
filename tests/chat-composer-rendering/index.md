@@ -35,6 +35,7 @@ Return to the [manual test index](../../tests.md).
 | [Completed plan cards expose implement action](completed-plan-cards-expose-implement-action.md) |
 | [Default mode can follow plan mode in the same thread](default-mode-can-follow-plan-mode-in-the-same-thread.md) |
 | [Queue mode is default for in-progress messages](queue-mode-is-default-for-in-progress-messages.md) |
+| [Per-thread reasoning effort](per-thread-reasoning-effort.md) |
 | [Backend-persisted queued messages and drag reorder](backend-persisted-queued-messages-and-drag-reorder.md) |
 | [Backend-drained queue UI refresh](backend-drained-queue-ui-refresh.md) |
 | [Persisted idle queue recovery](persisted-idle-queue-recovery.md) |
